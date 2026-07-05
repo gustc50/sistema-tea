@@ -65,6 +65,13 @@ def init_db():
             clinic_close_time TEXT NOT NULL DEFAULT '18:00',
             session_duration_minutes INTEGER NOT NULL DEFAULT 50,
             buffer_minutes INTEGER NOT NULL DEFAULT 10,
+            clinic_name TEXT,
+            clinic_document TEXT,
+            clinic_logo TEXT,
+            clinic_street TEXT,
+            clinic_number TEXT,
+            clinic_neighborhood TEXT,
+            clinic_zip TEXT,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS appointments (
@@ -81,6 +88,15 @@ def init_db():
     ''')
     conn.commit()
     conn.execute('INSERT OR IGNORE INTO settings (id) VALUES (1)')
+    conn.commit()
+
+    # Bancos criados antes dos dados da clínica (nome, CNPJ/CPF, logo,
+    # endereço) existirem não têm essas colunas em `settings`.
+    settings_cols = [r['name'] for r in conn.execute("PRAGMA table_info(settings)").fetchall()]
+    for col in ('clinic_name', 'clinic_document', 'clinic_logo', 'clinic_street',
+                'clinic_number', 'clinic_neighborhood', 'clinic_zip'):
+        if col not in settings_cols:
+            conn.execute(f'ALTER TABLE settings ADD COLUMN {col} TEXT')
     conn.commit()
 
     # Bancos criados antes do campo "paciente desde" existir não têm essa
@@ -272,9 +288,16 @@ def update_settings():
     conn = get_db()
     conn.execute('''
         UPDATE settings SET clinic_open_time = ?, clinic_close_time = ?,
-            session_duration_minutes = ?, buffer_minutes = ?, updated_at = CURRENT_TIMESTAMP
+            session_duration_minutes = ?, buffer_minutes = ?,
+            clinic_name = ?, clinic_document = ?, clinic_logo = ?,
+            clinic_street = ?, clinic_number = ?, clinic_neighborhood = ?, clinic_zip = ?,
+            updated_at = CURRENT_TIMESTAMP
         WHERE id = 1
-    ''', (clinic_open_time, clinic_close_time, session_duration_minutes, buffer_minutes))
+    ''', (
+        clinic_open_time, clinic_close_time, session_duration_minutes, buffer_minutes,
+        data.get('clinic_name'), data.get('clinic_document'), data.get('clinic_logo'),
+        data.get('clinic_street'), data.get('clinic_number'), data.get('clinic_neighborhood'), data.get('clinic_zip')
+    ))
     conn.commit()
     conn.close()
     return jsonify({'status': 'ok'})

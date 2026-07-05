@@ -178,6 +178,24 @@
         <div id="tab-configuracoes" class="tab-content">
             <h1>Configurações</h1>
             <div class="card">
+                <label>Dados da Clínica</label>
+                <div class="form-grid" style="margin-top:15px;">
+                    <div class="form-full"><label>Nome da Clínica</label><input type="text" id="cfgClinicName"></div>
+                    <div><label>CNPJ/CPF</label><input type="text" id="cfgClinicDocument"></div>
+                    <div>
+                        <label>Logo</label>
+                        <input type="file" id="cfgClinicLogoFile" accept="image/*" onchange="handleLogoUpload(event)">
+                    </div>
+                    <div class="form-full" id="cfgLogoPreviewWrap" style="display:none;">
+                        <img id="cfgLogoPreview" alt="Logo da clínica" style="max-height:80px;max-width:220px;border:1px solid #e2e8f0;border-radius:8px;padding:6px;background:#f8fafc;">
+                    </div>
+                    <div class="form-full"><label>Rua/Avenida</label><input type="text" id="cfgStreet"></div>
+                    <div><label>Número</label><input type="text" id="cfgNumber"></div>
+                    <div><label>Bairro</label><input type="text" id="cfgNeighborhood"></div>
+                    <div><label>CEP</label><input type="text" id="cfgZip" placeholder="00000-000"></div>
+                </div>
+            </div>
+            <div class="card">
                 <label>Horário Padrão da Clínica e Duração dos Atendimentos</label>
                 <div class="form-grid" style="margin-top:15px;">
                     <div><label>Abertura</label><input type="time" id="cfgOpenTime"></div>
@@ -221,6 +239,7 @@ let allPatients = [];
 let allProfessionals = [];
 let currentNotes = [];
 let currentAppointments = [];
+let cfgClinicLogoDataUrl = null;
 
 function nowLocalDatetimeString() {
     const d = new Date();
@@ -309,6 +328,42 @@ async function refreshLists() {
     document.getElementById('cfgCloseTime').value = settings.clinic_close_time;
     document.getElementById('cfgDuration').value = settings.session_duration_minutes;
     document.getElementById('cfgBuffer').value = settings.buffer_minutes;
+    document.getElementById('cfgClinicName').value = settings.clinic_name || '';
+    document.getElementById('cfgClinicDocument').value = settings.clinic_document || '';
+    document.getElementById('cfgStreet').value = settings.clinic_street || '';
+    document.getElementById('cfgNumber').value = settings.clinic_number || '';
+    document.getElementById('cfgNeighborhood').value = settings.clinic_neighborhood || '';
+    document.getElementById('cfgZip').value = settings.clinic_zip || '';
+    cfgClinicLogoDataUrl = settings.clinic_logo || null;
+    showLogoPreview(cfgClinicLogoDataUrl);
+}
+
+function showLogoPreview(dataUrl) {
+    const wrap = document.getElementById('cfgLogoPreviewWrap');
+    const img = document.getElementById('cfgLogoPreview');
+    if (dataUrl) {
+        img.src = dataUrl;
+        wrap.style.display = 'block';
+    } else {
+        wrap.style.display = 'none';
+        img.removeAttribute('src');
+    }
+}
+
+function handleLogoUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+        alert('Imagem muito grande. Escolha um arquivo de até 2MB.');
+        event.target.value = '';
+        return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+        cfgClinicLogoDataUrl = reader.result;
+        showLogoPreview(cfgClinicLogoDataUrl);
+    };
+    reader.readAsDataURL(file);
 }
 
 function renderProfessionalsTable() {
@@ -353,7 +408,16 @@ async function saveSettings() {
     if(!clinic_open_time || !clinic_close_time) return alert('Informe o horário de abertura e fechamento.');
     if(!session_duration_minutes || session_duration_minutes <= 0) return alert('Informe um tempo de atendimento válido.');
     if(isNaN(buffer_minutes) || buffer_minutes < 0) return alert('Informe um tempo de troca válido.');
-    const res = await api('/api/settings', 'POST', { clinic_open_time, clinic_close_time, session_duration_minutes, buffer_minutes });
+    const res = await api('/api/settings', 'POST', {
+        clinic_open_time, clinic_close_time, session_duration_minutes, buffer_minutes,
+        clinic_name: document.getElementById('cfgClinicName').value.trim(),
+        clinic_document: document.getElementById('cfgClinicDocument').value.trim(),
+        clinic_logo: cfgClinicLogoDataUrl,
+        clinic_street: document.getElementById('cfgStreet').value.trim(),
+        clinic_number: document.getElementById('cfgNumber').value.trim(),
+        clinic_neighborhood: document.getElementById('cfgNeighborhood').value.trim(),
+        clinic_zip: document.getElementById('cfgZip').value.trim()
+    });
     if(res.error) return showStatus('❌ ' + res.error, true);
     showStatus('✅ Configurações salvas!');
 }
