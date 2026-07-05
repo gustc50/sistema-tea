@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Gestão TEA - Desktop SQLite</title>
+    <style>
+        :root { --primary: #2563eb; --sidebar: #1e293b; --bg: #f1f5f9; --card: #fff; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, sans-serif; outline: none; }
+        body { background: var(--bg); display: flex; height: 100vh; overflow: hidden; color: #334155; }
+        aside { width: 260px; background: var(--sidebar); color: white; display: flex; flex-direction: column; padding: 20px; flex-shrink: 0; }
+        aside h2 { font-size: 1.2rem; margin-bottom: 30px; display: flex; align-items: center; gap: 10px; }
+        aside button { background: transparent; border: none; color: #94a3b8; text-align: left; padding: 12px 15px; border-radius: 8px; cursor: pointer; font-size: 0.95rem; transition: all 0.2s; margin-bottom: 5px; display: flex; align-items: center; gap: 10px; }
+        aside button:hover { background: rgba(255,255,255,0.1); color: white; }
+        aside button.active { background: var(--primary); color: white; font-weight: 600; }
+        main { flex: 1; padding: 40px; overflow-y: auto; max-width: 1000px; margin: 0 auto; }
+        .tab-content { display: none; animation: fadeIn 0.3s ease; }
+        .tab-content.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        h1 { font-size: 1.8rem; margin-bottom: 25px; color: var(--sidebar); border-bottom: 2px solid #e2e8f0; padding-bottom: 15px; }
+        .card { background: var(--card); padding: 25px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid #e2e8f0; }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .form-full { grid-column: span 2; }
+        label { display: block; margin-bottom: 6px; font-weight: 600; font-size: 0.85rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+        input, select, textarea { width: 100%; padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.95rem; transition: border 0.2s; background: #f8fafc; }
+        input:focus, select:focus, textarea:focus { border-color: var(--primary); background: white; box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
+        button.btn-primary { background: var(--primary); color: white; border: none; padding: 12px 24px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+        button.btn-primary:hover { background: #1d4ed8; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th { text-align: left; padding: 12px; background: #f8fafc; font-size: 0.8rem; color: #64748b; text-transform: uppercase; border-bottom: 2px solid #e2e8f0; }
+        td { padding: 14px 12px; border-bottom: 1px solid #f1f5f9; font-size: 0.9rem; }
+        tr:hover td { background: #f8fafc; }
+        .badge { padding: 4px 10px; border-radius: 20px; font-size: 0.75rem; font-weight: 700; }
+        .badge-high { background: #fee2e2; color: #991b1b; }
+        .badge-low { background: #dcfce7; color: #166534; }
+        .result-panel { display: flex; align-items: center; gap: 30px; padding: 30px; background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%); border: 1px solid #bfdbfe; border-radius: 12px; margin-bottom: 20px; }
+        .score-big { font-size: 3.5rem; font-weight: 800; color: var(--primary); line-height: 1; }
+        .status-bar { position: fixed; bottom: 0; right: 0; background: #166534; color: white; padding: 8px 20px; border-radius: 8px 0 0 0; font-size: 0.8rem; display: none; z-index: 999; }
+        .search-box { position: relative; margin-bottom: 15px; }
+        .search-box input { padding-left: 36px; }
+        .search-box span { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #94a3b8; }
+        tr.patient-row { cursor: pointer; }
+        .row-action { color: var(--primary); font-weight: 600; font-size: 0.85rem; white-space: nowrap; }
+        .print-only { display: none; }
+        @media print {
+            body { background: white; height: auto; overflow: visible; }
+            aside, .no-print, #statusBar { display: none !important; }
+            main { max-width: 100%; padding: 0; margin: 0; overflow: visible; }
+            .card { box-shadow: none; border: 1px solid #cbd5e1; break-inside: avoid; }
+            textarea { display: none; }
+            .print-only { display: block; }
+        }
+    </style>
+</head>
+<body>
+    <aside class="no-print">
+        <h2>🧩 Gestão TEA</h2>
+        <button onclick="switchTab('cadastro')" class="active" id="nav-cadastro">👤 Cadastro</button>
+        <button onclick="switchTab('testes')" id="nav-testes">📋 Aplicar Testes</button>
+        <button onclick="switchTab('prontuario')" id="nav-prontuario">📂 Prontuário</button>
+        <div style="margin-top:auto; font-size:0.75rem; color:#64748b; padding:10px;">v2.0 SQLite Local<br>Dados: prontuario_tea.db</div>
+    </aside>
+
+    <main>
+        <!-- CADASTRO -->
+        <div id="tab-cadastro" class="tab-content active">
+            <h1>Cadastro de Pacientes</h1>
+            <div class="card">
+                <div class="form-grid">
+                    <div class="form-full"><label>Nome Completo</label><input type="text" id="pName"></div>
+                    <div><label>Data de Nascimento</label><input type="date" id="pDob"></div>
+                    <div><label>Contato</label><input type="tel" id="pContact"></div>
+                    <div class="form-full"><button class="btn-primary" onclick="savePatient()">💾 Salvar Paciente</button></div>
+                </div>
+            </div>
+            <div class="card">
+                <label>Pacientes Cadastrados</label>
+                <div class="search-box"><span>🔍</span><input type="text" id="patientSearch" placeholder="Buscar paciente pelo nome..." oninput="renderPatientsTable(this.value)"></div>
+                <table><thead><tr><th>Nome</th><th>Nascimento</th><th>Contato</th><th></th></tr></thead><tbody id="patientsTableBody"></tbody></table>
+            </div>
+        </div>
+
+        <!-- TESTES -->
+        <div id="tab-testes" class="tab-content">
+            <h1>Aplicação de Protocolos</h1>
+            <div class="card form-grid">
+                <div><label>Paciente</label><select id="testPatientSelect"><option value="">Selecione...</option></select></div>
+                <div><label>Protocolo</label><select id="testType" onchange="renderTestForm()"><option value="">Selecione...</option><option value="aq">AQ (Adultos)</option><option value="mchat">M-CHAT-R/F (Crianças)</option></select></div>
+            </div>
+            <form id="dynamicTestForm" class="card" style="display:none;"></form>
+        </div>
+
+        <!-- PRONTUÁRIO -->
+        <div id="tab-prontuario" class="tab-content">
+            <h1>Prontuário Clínico</h1>
+            <div class="card no-print"><label>Paciente</label><select id="prontPatientSelect" onchange="loadProntuario()"><option value="">-- Escolha --</option></select></div>
+            <div id="prontContent" style="display:none;">
+                <p id="printDate" class="print-only" style="color:#64748b;font-size:0.85rem;margin-bottom:15px;"></p>
+                <div class="result-panel">
+                    <div style="font-size:2rem;">👤</div>
+                    <div style="flex:1;"><h2 id="prontName" style="margin:0;border:none;padding:0;font-size:1.4rem;"></h2><p id="prontMeta" style="color:#64748b;margin-top:5px;"></p></div>
+                    <button class="btn-primary no-print" onclick="preparePrint()">🖨️ Imprimir / Salvar PDF</button>
+                </div>
+                <div class="card"><label>Histórico de Avaliações</label><table><thead><tr><th>Data</th><th>Protocolo</th><th>Resultado</th><th>Interpretação</th></tr></thead><tbody id="testHistoryTable"></tbody></table></div>
+                <div class="card"><label>Evolução Clínica</label><textarea id="clinicalNotes" rows="8" placeholder="Registre observações da sessão..."></textarea><div id="notesPrintView" class="print-only"></div><div class="no-print" style="margin-top:15px;display:flex;justify-content:flex-end;"><button class="btn-primary" onclick="saveNotes()">💾 Salvar Evolução</button></div></div>
+            </div>
+        </div>
+    </main>
+    <div id="statusBar" class="status-bar"></div>
+
+<script>
+const API = '';
+const TESTS_CONFIG = {
+    aq: { name: "AQ - Autism Spectrum Quotient", options: [{value:'agree',label:'Sim/Concordo'},{value:'disagree',label:'Não/Discordo'}], questions: ["Prefiro fazer coisas com outras pessoas.","Prefiro fazer as coisas sempre da mesma maneira.","Me interesso mais pelas partes do que pelo todo.","Acho difícil imaginar ser outra pessoa.","Situações sociais são fáceis para mim."], scoring: a => { let s=0; a.forEach((v,i)=>{if((i%2===0&&v==='agree')||(i%2!==0&&v==='disagree'))s++;}); return {score:s,max:5,interpretation:s>=3?"Indicativo de traços autísticos. Avaliação especializada recomendada.":"Baixa probabilidade de traços significativos."}; } },
+    mchat: { name: "M-CHAT-R/F (Amostra)", options: [{value:'yes',label:'Sim'},{value:'no',label:'Não'}], questions: ["Olha para onde você aponta?","Já suspeitou de perda auditiva?","Brinca de faz-de-conta?","Responde quando chamado?","Aponta para pedir algo?"], scoring: a => { let r=a.filter(v=>v==='no').length; return {score:r,max:5,interpretation:r>=2?"Risco elevado. Encaminhamento recomendado.":"Baixo risco. Monitorar desenvolvimento."}; } }
+};
+
+let allPatients = [];
+
+function escapeHtml(str) {
+    return String(str ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function showStatus(msg, isError=false) {
+    const bar = document.getElementById('statusBar');
+    bar.textContent = msg; bar.style.background = isError ? '#991b1b' : '#166534';
+    bar.style.display = 'block'; setTimeout(() => bar.style.display = 'none', 3000);
+}
+
+async function api(url, method='GET', body=null) {
+    const opts = { method, headers: {'Content-Type':'application/json'} };
+    if(body) opts.body = JSON.stringify(body);
+    const res = await fetch(API + url, opts);
+    return res.json();
+}
+
+async function switchTab(tab) {
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('aside button').forEach(b => b.classList.remove('active'));
+    document.getElementById(`tab-${tab}`).classList.add('active');
+    document.getElementById(`nav-${tab}`).classList.add('active');
+    await refreshLists();
+}
+
+async function openProntuario(id) {
+    await switchTab('prontuario');
+    document.getElementById('prontPatientSelect').value = id;
+    loadProntuario();
+}
+
+async function refreshLists() {
+    const patients = await api('/api/patients');
+    allPatients = patients;
+    const opts = patients.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+    document.getElementById('testPatientSelect').innerHTML = '<option value="">Selecione...</option>' + opts;
+    document.getElementById('prontPatientSelect').innerHTML = '<option value="">-- Escolha --</option>' + opts;
+
+    renderPatientsTable(document.getElementById('patientSearch')?.value || '');
+}
+
+function renderPatientsTable(filter='') {
+    const tbody = document.getElementById('patientsTableBody');
+    if (!allPatients.length) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:30px;">Nenhum paciente.</td></tr>';
+        return;
+    }
+    const f = filter.trim().toLowerCase();
+    const filtered = f ? allPatients.filter(p => p.name.toLowerCase().includes(f)) : allPatients;
+    if (!filtered.length) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:30px;">Nenhum paciente encontrado.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = filtered.map(p => `<tr class="patient-row" onclick="openProntuario(${p.id})"><td><strong>${escapeHtml(p.name)}</strong></td><td>${escapeHtml(p.dob)||'-'}</td><td>${escapeHtml(p.contact)||'-'}</td><td class="row-action">📂 Ver prontuário</td></tr>`).join('');
+}
+
+async function savePatient() {
+    const name = document.getElementById('pName').value.trim();
+    if(!name) return alert('Nome obrigatório');
+    await api('/api/patients', 'POST', { name, dob: document.getElementById('pDob').value, contact: document.getElementById('pContact').value });
+    showStatus('✅ Paciente salvo no banco de dados!');
+    document.getElementById('pName').value = ''; document.getElementById('pDob').value = ''; document.getElementById('pContact').value = '';
+    refreshLists();
+}
+
+function renderTestForm() {
+    const type = document.getElementById('testType').value;
+    const form = document.getElementById('dynamicTestForm');
+    if(!type) { form.style.display='none'; return; }
+    const cfg = TESTS_CONFIG[type];
+    let html = `<h3 style="margin-bottom:20px;color:var(--primary);">${cfg.name}</h3>`;
+    cfg.questions.forEach((q,i) => {
+        const optsHtml = cfg.options.map((o,oi) => `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;text-transform:none;font-weight:normal;"><input type="radio" name="q${i}" value="${o.value}"${oi===0?' required':''}> ${escapeHtml(o.label)}</label>`).join('');
+        html += `<div style="margin-bottom:15px;padding:15px;background:#f8fafc;border-radius:8px;"><label style="margin-bottom:10px;font-size:0.95rem;color:#334155;text-transform:none;">${i+1}. ${escapeHtml(q)}</label><div style="display:flex;gap:15px;">${optsHtml}</div></div>`;
+    });
+    html += `<button type="button" class="btn-primary" style="width:100%;margin-top:10px;" onclick="calculateResult('${type}')">📊 Calcular e Salvar</button>`;
+    form.innerHTML = html; form.style.display = 'block';
+}
+
+async function calculateResult(type) {
+    const pid = document.getElementById('testPatientSelect').value;
+    if(!pid) return alert('Selecione um paciente.');
+    const answers = Array.from(document.querySelectorAll('#dynamicTestForm input[type=radio]:checked')).map(r=>r.value);
+    if(answers.length < TESTS_CONFIG[type].questions.length) return alert('Responda todas as perguntas.');
+    const result = TESTS_CONFIG[type].scoring(answers);
+    await api('/api/tests', 'POST', { patientId: Number(pid), type, ...result });
+    showStatus('✅ Resultado salvo no banco de dados!');
+    const isHigh = (type==='aq'&&result.score>=3)||(type==='mchat'&&result.score>=2);
+    document.getElementById('dynamicTestForm').innerHTML = `<div class="result-panel"><div class="score-big">${result.score}/${result.max}</div><div><h3 style="margin-bottom:8px;color:${isHigh?'#991b1b':'#166534'}">${isHigh?'⚠️ Elevado':'✅ Normal'}</h3><p>${escapeHtml(result.interpretation)}</p><button type="button" class="btn-primary" style="margin-top:15px;padding:8px 16px;font-size:0.85rem;" onclick="openProntuario(${Number(pid)})">Ver Prontuário →</button></div></div>`;
+}
+
+async function loadProntuario() {
+    const pid = document.getElementById('prontPatientSelect').value;
+    const content = document.getElementById('prontContent');
+    if(!pid) { content.style.display='none'; return; }
+    const patients = await api('/api/patients');
+    const p = patients.find(x => x.id == pid);
+    document.getElementById('prontName').textContent = p.name;
+    document.getElementById('prontMeta').textContent = `Nasc: ${p.dob||'-'} | Contato: ${p.contact||'-'} | ID: #${p.id}`;
+
+    const tests = await api(`/api/tests/${pid}`);
+    const tbody = document.getElementById('testHistoryTable');
+    tbody.innerHTML = tests.length ? '' : '<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:20px;">Sem avaliações.</td></tr>';
+    tests.forEach(t => {
+        const isHigh = (t.type==='aq'&&t.score>=3)||(t.type==='mchat'&&t.score>=2);
+        tbody.innerHTML += `<tr><td>${new Date(t.date).toLocaleDateString('pt-BR')}</td><td><strong>${escapeHtml(TESTS_CONFIG[t.type]?.name||t.type)}</strong></td><td><span class="badge ${isHigh?'badge-high':'badge-low'}">${t.score}/${t.max_score}</span></td><td style="font-size:0.85rem;color:#64748b;">${escapeHtml(t.interpretation)}</td></tr>`;
+    });
+
+    const notes = await api(`/api/notes/${pid}`);
+    document.getElementById('clinicalNotes').value = notes.content || '';
+    document.getElementById('notesPrintView').textContent = notes.content || 'Nenhuma evolução registrada.';
+    content.style.display = 'block';
+}
+
+async function saveNotes() {
+    const pid = document.getElementById('prontPatientSelect').value;
+    if(!pid) return;
+    const content = document.getElementById('clinicalNotes').value;
+    await api(`/api/notes/${pid}`, 'POST', { content });
+    document.getElementById('notesPrintView').textContent = content || 'Nenhuma evolução registrada.';
+    showStatus('✅ Evolução salva no banco de dados!');
+}
+
+function preparePrint() {
+    document.getElementById('printDate').textContent = `Emitido em: ${new Date().toLocaleString('pt-BR')}`;
+    window.print();
+}
+
+refreshLists();
+</script>
+</body>
+</html>
