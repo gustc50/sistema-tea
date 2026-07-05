@@ -46,7 +46,6 @@
             aside, .no-print, #statusBar { display: none !important; }
             main { max-width: 100%; padding: 0; margin: 0; overflow: visible; }
             .card { box-shadow: none; border: 1px solid #cbd5e1; break-inside: avoid; }
-            textarea { display: none; }
             .print-only { display: block; }
         }
     </style>
@@ -101,7 +100,28 @@
                     <button class="btn-primary no-print" onclick="preparePrint()">🖨️ Imprimir / Salvar PDF</button>
                 </div>
                 <div class="card"><label>Histórico de Avaliações</label><table><thead><tr><th>Data</th><th>Protocolo</th><th>Resultado</th><th>Interpretação</th></tr></thead><tbody id="testHistoryTable"></tbody></table></div>
-                <div class="card"><label>Evolução Clínica</label><textarea id="clinicalNotes" rows="8" placeholder="Registre observações da sessão..."></textarea><div id="notesPrintView" class="print-only"></div><div class="no-print" style="margin-top:15px;display:flex;justify-content:flex-end;"><button class="btn-primary" onclick="saveNotes()">💾 Salvar Evolução</button></div></div>
+
+                <div class="card no-print">
+                    <label>Novo Atendimento</label>
+                    <div class="form-grid">
+                        <div><label>Data e Hora do Atendimento</label><input type="datetime-local" id="appointmentDateTime"></div>
+                    </div>
+                    <textarea id="newNoteContent" rows="6" placeholder="Registre as observações deste atendimento..." style="margin-top:15px;"></textarea>
+                    <p style="font-size:0.8rem;color:#94a3b8;margin-top:8px;">⚠️ Após salvo, o atendimento não pode ser editado ou excluído.</p>
+                    <div style="margin-top:10px;display:flex;justify-content:flex-end;">
+                        <button class="btn-primary" onclick="saveNote()">💾 Salvar Atendimento</button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <label>Histórico de Atendimentos</label>
+                    <div class="no-print" style="display:flex;gap:15px;align-items:flex-end;flex-wrap:wrap;margin:15px 0 20px;padding:15px;background:#f8fafc;border-radius:8px;">
+                        <div><label>De</label><input type="date" id="periodFrom"></div>
+                        <div><label>Até</label><input type="date" id="periodTo"></div>
+                        <button class="btn-primary" onclick="generatePeriodPdf()">📄 Gerar PDF do Período</button>
+                    </div>
+                    <div id="notesHistoryList"></div>
+                </div>
             </div>
         </div>
     </main>
@@ -115,6 +135,13 @@ const TESTS_CONFIG = {
 };
 
 let allPatients = [];
+let currentNotes = [];
+
+function nowLocalDatetimeString() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 function escapeHtml(str) {
     return String(str ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -224,24 +251,86 @@ async function loadProntuario() {
         tbody.innerHTML += `<tr><td>${new Date(t.date).toLocaleDateString('pt-BR')}</td><td><strong>${escapeHtml(TESTS_CONFIG[t.type]?.name||t.type)}</strong></td><td><span class="badge ${isHigh?'badge-high':'badge-low'}">${t.score}/${t.max_score}</span></td><td style="font-size:0.85rem;color:#64748b;">${escapeHtml(t.interpretation)}</td></tr>`;
     });
 
-    const notes = await api(`/api/notes/${pid}`);
-    document.getElementById('clinicalNotes').value = notes.content || '';
-    document.getElementById('notesPrintView').textContent = notes.content || 'Nenhuma evolução registrada.';
+    currentNotes = await api(`/api/notes/${pid}`);
+    renderNotesHistory();
+    document.getElementById('appointmentDateTime').value = nowLocalDatetimeString();
+    document.getElementById('newNoteContent').value = '';
     content.style.display = 'block';
 }
 
-async function saveNotes() {
+function renderNotesHistory() {
+    const container = document.getElementById('notesHistoryList');
+    if (!currentNotes.length) {
+        container.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px 0;">Nenhum atendimento registrado.</p>';
+        return;
+    }
+    container.innerHTML = currentNotes.map(n => `
+        <div style="padding:16px 0;border-bottom:1px solid #f1f5f9;">
+            <div style="font-weight:700;color:var(--primary);font-size:0.9rem;margin-bottom:6px;">${new Date(n.appointment_at).toLocaleString('pt-BR')}</div>
+            <div style="white-space:pre-wrap;font-size:0.9rem;color:#334155;">${escapeHtml(n.content)}</div>
+        </div>
+    `).join('');
+}
+
+async function saveNote() {
     const pid = document.getElementById('prontPatientSelect').value;
     if(!pid) return;
-    const content = document.getElementById('clinicalNotes').value;
-    await api(`/api/notes/${pid}`, 'POST', { content });
-    document.getElementById('notesPrintView').textContent = content || 'Nenhuma evolução registrada.';
-    showStatus('✅ Evolução salva no banco de dados!');
+    const appointmentAt = document.getElementById('appointmentDateTime').value;
+    const content = document.getElementById('newNoteContent').value.trim();
+    if(!appointmentAt) return alert('Informe a data e hora do atendimento.');
+    if(!content) return alert('Escreva o conteúdo do atendimento.');
+    await api(`/api/notes/${pid}`, 'POST', { appointment_at: appointmentAt, content });
+    showStatus('✅ Atendimento salvo no banco de dados!');
+    document.getElementById('newNoteContent').value = '';
+    document.getElementById('appointmentDateTime').value = nowLocalDatetimeString();
+    currentNotes = await api(`/api/notes/${pid}`);
+    renderNotesHistory();
 }
 
 function preparePrint() {
     document.getElementById('printDate').textContent = `Emitido em: ${new Date().toLocaleString('pt-BR')}`;
     window.print();
+}
+
+function generatePeriodPdf() {
+    const from = document.getElementById('periodFrom').value;
+    const to = document.getElementById('periodTo').value;
+    if(!from || !to) return alert('Selecione o período (de/até).');
+    if(from > to) return alert('A data inicial deve ser anterior ou igual à data final.');
+    const fromDate = new Date(from + 'T00:00:00');
+    const toDate = new Date(to + 'T23:59:59');
+    const filtered = currentNotes.filter(n => {
+        const d = new Date(n.appointment_at);
+        return d >= fromDate && d <= toDate;
+    });
+    if(!filtered.length) return alert('Nenhum atendimento encontrado nesse período.');
+
+    const patientName = document.getElementById('prontName').textContent;
+    const patientMeta = document.getElementById('prontMeta').textContent;
+    const itemsHtml = filtered.map(n => `
+        <div style="margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid #e2e8f0;">
+            <div style="font-weight:700;color:#2563eb;margin-bottom:6px;">${new Date(n.appointment_at).toLocaleString('pt-BR')}</div>
+            <div style="white-space:pre-wrap;">${escapeHtml(n.content)}</div>
+        </div>
+    `).join('');
+    const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Prontuário - ${escapeHtml(patientName)}</title>
+        <style>
+            body{font-family:'Segoe UI',system-ui,sans-serif;color:#334155;padding:40px;}
+            h1{font-size:1.4rem;border-bottom:2px solid #e2e8f0;padding-bottom:10px;margin-bottom:5px;}
+            .meta{color:#64748b;margin-bottom:5px;}
+            .period{color:#64748b;margin-bottom:25px;font-size:0.9rem;}
+        </style></head>
+        <body>
+            <h1>${escapeHtml(patientName)}</h1>
+            <p class="meta">${escapeHtml(patientMeta)}</p>
+            <p class="period">Atendimentos de ${fromDate.toLocaleDateString('pt-BR')} a ${new Date(to+'T00:00:00').toLocaleDateString('pt-BR')} — emitido em ${new Date().toLocaleString('pt-BR')}</p>
+            ${itemsHtml}
+        </body></html>`;
+    const win = window.open('', '_blank');
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 300);
 }
 
 refreshLists();

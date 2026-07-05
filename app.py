@@ -2,7 +2,6 @@ from flask import Flask, request, jsonify, send_file
 import sqlite3
 import os
 import json
-from datetime import datetime
 
 app = Flask(__name__)
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'prontuario_tea.db')
@@ -11,6 +10,17 @@ def get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
+
+NOTES_SCHEMA = '''
+    CREATE TABLE notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        patient_id INTEGER NOT NULL,
+        appointment_at TIMESTAMP NOT NULL,
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (patient_id) REFERENCES patients(id)
+    );
+'''
 
 def init_db():
     """Cria as tabelas automaticamente na primeira execução"""
@@ -33,13 +43,28 @@ def init_db():
             date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (patient_id) REFERENCES patients(id)
         );
-        CREATE TABLE IF NOT EXISTS notes (
-            patient_id INTEGER PRIMARY KEY,
-            content TEXT,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (patient_id) REFERENCES patients(id)
-        );
     ''')
+    conn.commit()
+
+    # A tabela `notes` mudou de "1 nota mutável por paciente" para "vários
+    # atendimentos imutáveis, com data/hora". Se o banco já existir com o
+    # esquema antigo (sem coluna `id`), migra os dados preservando a nota
+    # existente como o primeiro atendimento registrado.
+    note_cols = [r['name'] for r in conn.execute("PRAGMA table_info(notes)").fetchall()]
+    if not note_cols:
+        conn.executescript(NOTES_SCHEMA)
+    elif 'id' not in note_cols:
+        conn.execute('ALTER TABLE notes RENAME TO notes_old')
+        conn.executescript(NOTES_SCHEMA)
+        old_rows = conn.execute(
+            "SELECT patient_id, content, updated_at FROM notes_old WHERE content IS NOT NULL AND content != ''"
+        ).fetchall()
+        for row in old_rows:
+            conn.execute(
+                'INSERT INTO notes (patient_id, appointment_at, content, created_at) VALUES (?, ?, ?, ?)',
+                (row['patient_id'], row['updated_at'], row['content'], row['updated_at'])
+            )
+        conn.execute('DROP TABLE notes_old')
     conn.commit()
     conn.close()
 
@@ -91,21 +116,29 @@ def get_tests(patient_id):
 @app.route('/api/notes/<int:patient_id>', methods=['GET'])
 def get_notes(patient_id):
     conn = get_db()
-    note = conn.execute('SELECT content FROM notes WHERE patient_id = ?', (patient_id,)).fetchone()
+    notes = conn.execute(
+        'SELECT id, patient_id, appointment_at, content, created_at FROM notes WHERE patient_id = ? ORDER BY appointment_at DESC',
+        (patient_id,)
+    ).fetchall()
     conn.close()
-    return jsonify({'content': note['content'] if note else ''})
+    return jsonify([dict(n) for n in notes])
 
 @app.route('/api/notes/<int:patient_id>', methods=['POST'])
 def save_notes(patient_id):
     data = request.json
+    appointment_at = (data.get('appointment_at') or '').strip()
+    content = (data.get('content') or '').strip()
+    if not appointment_at or not content:
+        return jsonify({'error': 'appointment_at e content são obrigatórios'}), 400
     conn = get_db()
-    conn.execute('''
-        INSERT INTO notes (patient_id, content, updated_at) VALUES (?, ?, ?)
-        ON CONFLICT(patient_id) DO UPDATE SET content = ?, updated_at = ?
-    ''', (patient_id, data['content'], datetime.now(), data['content'], datetime.now()))
+    cursor = conn.execute(
+        'INSERT INTO notes (patient_id, appointment_at, content) VALUES (?, ?, ?)',
+        (patient_id, appointment_at, content)
+    )
     conn.commit()
+    new_id = cursor.lastrowid
     conn.close()
-    return jsonify({'status': 'ok'})
+    return jsonify({'id': new_id, 'patient_id': patient_id, 'appointment_at': appointment_at, 'content': content}), 201
 
 if __name__ == '__main__':
     init_db()
