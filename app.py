@@ -44,7 +44,43 @@ def init_db():
             date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (patient_id) REFERENCES patients(id)
         );
+        CREATE TABLE IF NOT EXISTS professionals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            full_name TEXT NOT NULL,
+            profession TEXT NOT NULL,
+            council_registration TEXT,
+            dob TEXT,
+            address TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS professional_modules (
+            professional_id INTEGER NOT NULL,
+            module TEXT NOT NULL,
+            PRIMARY KEY (professional_id, module),
+            FOREIGN KEY (professional_id) REFERENCES professionals(id)
+        );
+        CREATE TABLE IF NOT EXISTS settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            clinic_open_time TEXT NOT NULL DEFAULT '08:00',
+            clinic_close_time TEXT NOT NULL DEFAULT '18:00',
+            session_duration_minutes INTEGER NOT NULL DEFAULT 50,
+            buffer_minutes INTEGER NOT NULL DEFAULT 10,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS appointments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient_id INTEGER NOT NULL,
+            professional_id INTEGER NOT NULL,
+            date TEXT NOT NULL,
+            start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (patient_id) REFERENCES patients(id),
+            FOREIGN KEY (professional_id) REFERENCES professionals(id)
+        );
     ''')
+    conn.commit()
+    conn.execute('INSERT OR IGNORE INTO settings (id) VALUES (1)')
     conn.commit()
 
     # Bancos criados antes do campo "paciente desde" existir não têm essa
@@ -75,7 +111,15 @@ def init_db():
                 (row['patient_id'], row['updated_at'], row['content'], row['updated_at'])
             )
         conn.execute('DROP TABLE notes_old')
-    conn.commit()
+        conn.commit()
+
+    # Notas registradas antes de existir a tabela `professionals` não têm
+    # profissional vinculado; ficam como "profissional não informado".
+    note_cols = [r['name'] for r in conn.execute("PRAGMA table_info(notes)").fetchall()]
+    if 'professional_id' not in note_cols:
+        conn.execute('ALTER TABLE notes ADD COLUMN professional_id INTEGER REFERENCES professionals(id)')
+        conn.commit()
+
     conn.close()
 
 # --- ROTAS DA API ---
@@ -131,7 +175,7 @@ def get_tests(patient_id):
 def get_notes(patient_id):
     conn = get_db()
     notes = conn.execute(
-        'SELECT id, patient_id, appointment_at, content, created_at FROM notes WHERE patient_id = ? ORDER BY appointment_at DESC',
+        'SELECT id, patient_id, appointment_at, content, professional_id, created_at FROM notes WHERE patient_id = ? ORDER BY appointment_at DESC',
         (patient_id,)
     ).fetchall()
     conn.close()
@@ -142,17 +186,177 @@ def save_notes(patient_id):
     data = request.json
     appointment_at = (data.get('appointment_at') or '').strip()
     content = (data.get('content') or '').strip()
-    if not appointment_at or not content:
-        return jsonify({'error': 'appointment_at e content são obrigatórios'}), 400
+    professional_id = data.get('professional_id')
+    if not appointment_at or not content or not professional_id:
+        return jsonify({'error': 'appointment_at, content e professional_id são obrigatórios'}), 400
     conn = get_db()
     cursor = conn.execute(
-        'INSERT INTO notes (patient_id, appointment_at, content) VALUES (?, ?, ?)',
-        (patient_id, appointment_at, content)
+        'INSERT INTO notes (patient_id, appointment_at, content, professional_id) VALUES (?, ?, ?, ?)',
+        (patient_id, appointment_at, content, professional_id)
     )
     conn.commit()
     new_id = cursor.lastrowid
     conn.close()
-    return jsonify({'id': new_id, 'patient_id': patient_id, 'appointment_at': appointment_at, 'content': content}), 201
+    return jsonify({'id': new_id, 'patient_id': patient_id, 'appointment_at': appointment_at, 'content': content, 'professional_id': professional_id}), 201
+
+@app.route('/api/professionals', methods=['GET'])
+def get_professionals():
+    conn = get_db()
+    professionals = conn.execute('SELECT * FROM professionals ORDER BY full_name').fetchall()
+    conn.close()
+    return jsonify([dict(p) for p in professionals])
+
+@app.route('/api/professionals', methods=['POST'])
+def add_professional():
+    data = request.json
+    full_name = (data.get('full_name') or '').strip()
+    profession = (data.get('profession') or '').strip()
+    if not full_name or not profession:
+        return jsonify({'error': 'full_name e profession são obrigatórios'}), 400
+    conn = get_db()
+    cursor = conn.execute(
+        'INSERT INTO professionals (full_name, profession, council_registration, dob, address) VALUES (?, ?, ?, ?, ?)',
+        (full_name, profession, data.get('council_registration'), data.get('dob'), data.get('address'))
+    )
+    conn.commit()
+    new_id = cursor.lastrowid
+    conn.close()
+    return jsonify({
+        'id': new_id, 'full_name': full_name, 'profession': profession,
+        'council_registration': data.get('council_registration'),
+        'dob': data.get('dob'), 'address': data.get('address')
+    }), 201
+
+@app.route('/api/professional-modules/<int:professional_id>', methods=['GET'])
+def get_professional_modules(professional_id):
+    conn = get_db()
+    rows = conn.execute(
+        'SELECT module FROM professional_modules WHERE professional_id = ?', (professional_id,)
+    ).fetchall()
+    conn.close()
+    return jsonify([r['module'] for r in rows])
+
+@app.route('/api/professional-modules/<int:professional_id>', methods=['POST'])
+def set_professional_modules(professional_id):
+    data = request.json
+    modules = data.get('modules') or []
+    conn = get_db()
+    conn.execute('DELETE FROM professional_modules WHERE professional_id = ?', (professional_id,))
+    conn.executemany(
+        'INSERT INTO professional_modules (professional_id, module) VALUES (?, ?)',
+        [(professional_id, m) for m in modules]
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'ok'})
+
+@app.route('/api/settings', methods=['GET'])
+def get_settings():
+    conn = get_db()
+    row = conn.execute('SELECT * FROM settings WHERE id = 1').fetchone()
+    conn.close()
+    return jsonify(dict(row))
+
+@app.route('/api/settings', methods=['POST'])
+def update_settings():
+    data = request.json
+    clinic_open_time = (data.get('clinic_open_time') or '').strip()
+    clinic_close_time = (data.get('clinic_close_time') or '').strip()
+    try:
+        session_duration_minutes = int(data.get('session_duration_minutes'))
+        buffer_minutes = int(data.get('buffer_minutes'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'session_duration_minutes e buffer_minutes devem ser números'}), 400
+    if not clinic_open_time or not clinic_close_time or session_duration_minutes <= 0 or buffer_minutes < 0:
+        return jsonify({'error': 'Dados de configuração inválidos'}), 400
+    conn = get_db()
+    conn.execute('''
+        UPDATE settings SET clinic_open_time = ?, clinic_close_time = ?,
+            session_duration_minutes = ?, buffer_minutes = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = 1
+    ''', (clinic_open_time, clinic_close_time, session_duration_minutes, buffer_minutes))
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'ok'})
+
+def _time_to_minutes(t):
+    h, m = t.split(':')
+    return int(h) * 60 + int(m)
+
+def _minutes_to_time(mins):
+    return f'{mins // 60:02d}:{mins % 60:02d}'
+
+@app.route('/api/appointments', methods=['GET'])
+def get_appointments():
+    date = request.args.get('date')
+    professional_id = request.args.get('professional_id')
+    query = 'SELECT * FROM appointments WHERE 1=1'
+    params = []
+    if date:
+        query += ' AND date = ?'
+        params.append(date)
+    if professional_id:
+        query += ' AND professional_id = ?'
+        params.append(professional_id)
+    query += ' ORDER BY start_time'
+    conn = get_db()
+    rows = conn.execute(query, params).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+@app.route('/api/appointments', methods=['POST'])
+def add_appointment():
+    data = request.json
+    patient_id = data.get('patient_id')
+    professional_id = data.get('professional_id')
+    date = (data.get('date') or '').strip()
+    start_time = (data.get('start_time') or '').strip()
+    if not patient_id or not professional_id or not date or not start_time:
+        return jsonify({'error': 'patient_id, professional_id, date e start_time são obrigatórios'}), 400
+
+    conn = get_db()
+    settings = conn.execute('SELECT * FROM settings WHERE id = 1').fetchone()
+    duration = settings['session_duration_minutes']
+    buffer_minutes = settings['buffer_minutes']
+
+    start_min = _time_to_minutes(start_time)
+    end_min = start_min + duration
+    end_time = _minutes_to_time(end_min)
+
+    existing = conn.execute(
+        'SELECT start_time, end_time FROM appointments WHERE professional_id = ? AND date = ?',
+        (professional_id, date)
+    ).fetchall()
+    new_block_end = end_min + buffer_minutes
+    for row in existing:
+        ex_start = _time_to_minutes(row['start_time'])
+        ex_block_end = _time_to_minutes(row['end_time']) + buffer_minutes
+        if start_min < ex_block_end and ex_start < new_block_end:
+            conn.close()
+            return jsonify({
+                'error': f'Conflito de horário: já existe um atendimento das {row["start_time"]} às {row["end_time"]} '
+                         f'para esse profissional (considerando o tempo de troca).'
+            }), 409
+
+    cursor = conn.execute(
+        'INSERT INTO appointments (patient_id, professional_id, date, start_time, end_time) VALUES (?, ?, ?, ?, ?)',
+        (patient_id, professional_id, date, start_time, end_time)
+    )
+    conn.commit()
+    new_id = cursor.lastrowid
+    conn.close()
+    return jsonify({
+        'id': new_id, 'patient_id': patient_id, 'professional_id': professional_id,
+        'date': date, 'start_time': start_time, 'end_time': end_time
+    }), 201
+
+@app.route('/api/appointments/<int:appointment_id>', methods=['DELETE'])
+def delete_appointment(appointment_id):
+    conn = get_db()
+    conn.execute('DELETE FROM appointments WHERE id = ?', (appointment_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'ok'})
 
 if __name__ == '__main__':
     init_db()

@@ -56,6 +56,9 @@
         <button onclick="switchTab('cadastro')" class="active" id="nav-cadastro">👤 Cadastro</button>
         <button onclick="switchTab('testes')" id="nav-testes">📋 Aplicar Testes</button>
         <button onclick="switchTab('prontuario')" id="nav-prontuario">📂 Prontuário</button>
+        <button onclick="openAgenda()" id="nav-agenda">🗓️ Agenda</button>
+        <button onclick="switchTab('profissionais')" id="nav-profissionais">🩺 Profissionais</button>
+        <button onclick="openConfiguracoes()" id="nav-configuracoes">⚙️ Configurações</button>
         <div style="margin-top:auto; font-size:0.75rem; color:#64748b; padding:10px;">v2.0 SQLite Local<br>Dados: prontuario_tea.db</div>
     </aside>
 
@@ -105,6 +108,7 @@
                 <div class="card no-print">
                     <label>Novo Atendimento</label>
                     <div class="form-grid">
+                        <div><label>Profissional Responsável *</label><select id="noteProfessionalSelect"><option value="">Selecione...</option></select></div>
                         <div><label>Data e Hora do Atendimento</label><input type="datetime-local" id="appointmentDateTime"></div>
                     </div>
                     <textarea id="newNoteContent" rows="6" placeholder="Registre as observações deste atendimento..." style="margin-top:15px;"></textarea>
@@ -125,6 +129,75 @@
                 </div>
             </div>
         </div>
+
+        <!-- AGENDA -->
+        <div id="tab-agenda" class="tab-content">
+            <h1>Agenda</h1>
+            <div class="card form-grid">
+                <div><label>Profissional</label><select id="agendaProfessionalSelect" onchange="loadAgenda()"><option value="">Selecione...</option></select></div>
+                <div><label>Data</label><input type="date" id="agendaDate" onchange="loadAgenda()"></div>
+            </div>
+            <div class="card">
+                <label>Horários do Dia</label>
+                <div id="agendaSlots" style="margin-top:15px;"></div>
+            </div>
+        </div>
+
+        <!-- PROFISSIONAIS -->
+        <div id="tab-profissionais" class="tab-content">
+            <h1>Profissionais</h1>
+            <div class="card">
+                <div class="form-grid">
+                    <div class="form-full"><label>Nome Completo</label><input type="text" id="profName"></div>
+                    <div>
+                        <label>Profissão</label>
+                        <select id="profProfession">
+                            <option value="">Selecione...</option>
+                            <option value="Fisioterapeuta">Fisioterapeuta</option>
+                            <option value="Enfermeiro">Enfermeiro</option>
+                            <option value="Psicólogo">Psicólogo</option>
+                            <option value="Terapeuta Ocupacional">Terapeuta Ocupacional</option>
+                            <option value="Pedagogo">Pedagogo</option>
+                            <option value="Médico">Médico</option>
+                            <option value="Gestor">Gestor</option>
+                        </select>
+                    </div>
+                    <div><label>Registro no Conselho de Classe</label><input type="text" id="profCouncil" placeholder="Ex: CREFITO 12345"></div>
+                    <div><label>Data de Nascimento</label><input type="date" id="profDob"></div>
+                    <div class="form-full"><label>Endereço</label><input type="text" id="profAddress"></div>
+                    <div class="form-full"><button class="btn-primary" onclick="saveProfessional()">💾 Salvar Profissional</button></div>
+                </div>
+            </div>
+            <div class="card">
+                <label>Profissionais Cadastrados</label>
+                <table><thead><tr><th>Nome</th><th>Profissão</th><th>Registro</th><th>Nascimento</th></tr></thead><tbody id="professionalsTableBody"></tbody></table>
+            </div>
+        </div>
+
+        <!-- CONFIGURAÇÕES -->
+        <div id="tab-configuracoes" class="tab-content">
+            <h1>Configurações</h1>
+            <div class="card">
+                <label>Horário Padrão da Clínica e Duração dos Atendimentos</label>
+                <div class="form-grid" style="margin-top:15px;">
+                    <div><label>Abertura</label><input type="time" id="cfgOpenTime"></div>
+                    <div><label>Fechamento</label><input type="time" id="cfgCloseTime"></div>
+                    <div><label>Tempo de Atendimento (min)</label><input type="number" id="cfgDuration" min="1"></div>
+                    <div><label>Tempo de Troca / Descanso (min)</label><input type="number" id="cfgBuffer" min="0"></div>
+                    <div class="form-full"><button class="btn-primary" onclick="saveSettings()">💾 Salvar Configurações</button></div>
+                </div>
+            </div>
+            <div class="card">
+                <label>Acesso de Profissionais aos Módulos</label>
+                <div class="form-grid" style="margin-top:15px;">
+                    <div class="form-full"><label>Profissional</label><select id="cfgProfessionalSelect" onchange="loadProfessionalModules()"><option value="">Selecione...</option></select></div>
+                </div>
+                <div id="modulesChecklist" style="margin-top:15px;display:grid;grid-template-columns:1fr 1fr;gap:10px;"></div>
+                <div style="margin-top:15px;display:flex;justify-content:flex-end;">
+                    <button class="btn-primary" onclick="saveProfessionalModules()">💾 Salvar Acesso</button>
+                </div>
+            </div>
+        </div>
     </main>
     <div id="statusBar" class="status-bar"></div>
 
@@ -135,13 +208,44 @@ const TESTS_CONFIG = {
     mchat: { name: "M-CHAT-R/F (Amostra)", options: [{value:'yes',label:'Sim'},{value:'no',label:'Não'}], questions: ["Olha para onde você aponta?","Já suspeitou de perda auditiva?","Brinca de faz-de-conta?","Responde quando chamado?","Aponta para pedir algo?"], scoring: a => { let r=a.filter(v=>v==='no').length; return {score:r,max:5,interpretation:r>=2?"Risco elevado. Encaminhamento recomendado.":"Baixo risco. Monitorar desenvolvimento."}; } }
 };
 
+const MODULES = [
+    { id: 'cadastro', label: 'Cadastro de Pacientes' },
+    { id: 'testes', label: 'Aplicar Testes' },
+    { id: 'prontuario', label: 'Prontuário' },
+    { id: 'agenda', label: 'Agenda' },
+    { id: 'profissionais', label: 'Profissionais' },
+    { id: 'configuracoes', label: 'Configurações' }
+];
+
 let allPatients = [];
+let allProfessionals = [];
 let currentNotes = [];
+let currentAppointments = [];
 
 function nowLocalDatetimeString() {
     const d = new Date();
     const pad = n => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function todayLocalDateString() {
+    const d = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+
+function timeToMinutes(t) {
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
+}
+
+function minutesToTime(mins) {
+    return `${String(Math.floor(mins/60)).padStart(2,'0')}:${String(mins%60).padStart(2,'0')}`;
+}
+
+function professionalLabel(id) {
+    const prof = allProfessionals.find(p => p.id === id);
+    return prof ? `${prof.full_name} (${prof.profession})` : 'Profissional não informado';
 }
 
 function escapeHtml(str) {
@@ -183,6 +287,171 @@ async function refreshLists() {
     document.getElementById('prontPatientSelect').innerHTML = '<option value="">-- Escolha --</option>' + opts;
 
     renderPatientsTable(document.getElementById('patientSearch')?.value || '');
+
+    allProfessionals = await api('/api/professionals');
+    const profOpts = allProfessionals.map(p => `<option value="${p.id}">${escapeHtml(p.full_name)} (${escapeHtml(p.profession)})</option>`).join('');
+    document.getElementById('noteProfessionalSelect').innerHTML = '<option value="">Selecione...</option>' + profOpts;
+
+    const agendaSelect = document.getElementById('agendaProfessionalSelect');
+    const prevAgendaProf = agendaSelect.value;
+    agendaSelect.innerHTML = '<option value="">Selecione...</option>' + profOpts;
+    if (prevAgendaProf) agendaSelect.value = prevAgendaProf;
+
+    const cfgSelect = document.getElementById('cfgProfessionalSelect');
+    const prevCfgProf = cfgSelect.value;
+    cfgSelect.innerHTML = '<option value="">Selecione...</option>' + profOpts;
+    if (prevCfgProf) cfgSelect.value = prevCfgProf;
+
+    renderProfessionalsTable();
+
+    const settings = await api('/api/settings');
+    document.getElementById('cfgOpenTime').value = settings.clinic_open_time;
+    document.getElementById('cfgCloseTime').value = settings.clinic_close_time;
+    document.getElementById('cfgDuration').value = settings.session_duration_minutes;
+    document.getElementById('cfgBuffer').value = settings.buffer_minutes;
+}
+
+function renderProfessionalsTable() {
+    const tbody = document.getElementById('professionalsTableBody');
+    if (!allProfessionals.length) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:30px;">Nenhum profissional cadastrado.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = allProfessionals.map(p => `<tr><td><strong>${escapeHtml(p.full_name)}</strong></td><td>${escapeHtml(p.profession)}</td><td>${escapeHtml(p.council_registration)||'-'}</td><td>${escapeHtml(p.dob)||'-'}</td></tr>`).join('');
+}
+
+async function saveProfessional() {
+    const full_name = document.getElementById('profName').value.trim();
+    const profession = document.getElementById('profProfession').value;
+    if(!full_name) return alert('Nome obrigatório');
+    if(!profession) return alert('Selecione a profissão.');
+    await api('/api/professionals', 'POST', {
+        full_name, profession,
+        council_registration: document.getElementById('profCouncil').value,
+        dob: document.getElementById('profDob').value,
+        address: document.getElementById('profAddress').value
+    });
+    showStatus('✅ Profissional salvo no banco de dados!');
+    document.getElementById('profName').value = '';
+    document.getElementById('profProfession').value = '';
+    document.getElementById('profCouncil').value = '';
+    document.getElementById('profDob').value = '';
+    document.getElementById('profAddress').value = '';
+    refreshLists();
+}
+
+async function openConfiguracoes() {
+    await switchTab('configuracoes');
+    if (document.getElementById('cfgProfessionalSelect').value) loadProfessionalModules();
+}
+
+async function saveSettings() {
+    const clinic_open_time = document.getElementById('cfgOpenTime').value;
+    const clinic_close_time = document.getElementById('cfgCloseTime').value;
+    const session_duration_minutes = Number(document.getElementById('cfgDuration').value);
+    const buffer_minutes = Number(document.getElementById('cfgBuffer').value);
+    if(!clinic_open_time || !clinic_close_time) return alert('Informe o horário de abertura e fechamento.');
+    if(!session_duration_minutes || session_duration_minutes <= 0) return alert('Informe um tempo de atendimento válido.');
+    if(isNaN(buffer_minutes) || buffer_minutes < 0) return alert('Informe um tempo de troca válido.');
+    const res = await api('/api/settings', 'POST', { clinic_open_time, clinic_close_time, session_duration_minutes, buffer_minutes });
+    if(res.error) return showStatus('❌ ' + res.error, true);
+    showStatus('✅ Configurações salvas!');
+}
+
+function renderModulesChecklist(selectedModules = []) {
+    const container = document.getElementById('modulesChecklist');
+    container.innerHTML = MODULES.map(m => `
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:normal;font-size:0.9rem;color:#334155;">
+            <input type="checkbox" style="width:auto;" value="${m.id}" ${selectedModules.includes(m.id) ? 'checked' : ''}> ${m.label}
+        </label>
+    `).join('');
+}
+
+async function loadProfessionalModules() {
+    const profId = document.getElementById('cfgProfessionalSelect').value;
+    if (!profId) { renderModulesChecklist([]); return; }
+    const modules = await api(`/api/professional-modules/${profId}`);
+    renderModulesChecklist(modules);
+}
+
+async function saveProfessionalModules() {
+    const profId = document.getElementById('cfgProfessionalSelect').value;
+    if (!profId) return alert('Selecione um profissional.');
+    const modules = Array.from(document.querySelectorAll('#modulesChecklist input:checked')).map(el => el.value);
+    await api(`/api/professional-modules/${profId}`, 'POST', { modules });
+    showStatus('✅ Acesso aos módulos salvo!');
+}
+
+async function openAgenda() {
+    await switchTab('agenda');
+    if (!document.getElementById('agendaDate').value) {
+        document.getElementById('agendaDate').value = todayLocalDateString();
+    }
+    if (document.getElementById('agendaProfessionalSelect').value) loadAgenda();
+}
+
+async function loadAgenda() {
+    const profId = document.getElementById('agendaProfessionalSelect').value;
+    const date = document.getElementById('agendaDate').value;
+    const container = document.getElementById('agendaSlots');
+    if (!profId || !date) {
+        container.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px 0;">Selecione o profissional e a data.</p>';
+        return;
+    }
+    currentAppointments = await api(`/api/appointments?date=${date}&professional_id=${profId}`);
+    const settings = await api('/api/settings');
+    const slots = [];
+    let cur = timeToMinutes(settings.clinic_open_time);
+    const close = timeToMinutes(settings.clinic_close_time);
+    const duration = settings.session_duration_minutes;
+    const step = duration + settings.buffer_minutes;
+    while (cur + duration <= close) {
+        slots.push({ start: cur, end: cur + duration });
+        cur += step;
+    }
+    if (!slots.length) {
+        container.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px 0;">Nenhum horário configurado. Verifique as Configurações.</p>';
+        return;
+    }
+    const patientOptions = '<option value="">Selecionar paciente...</option>' + allPatients.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+    container.innerHTML = slots.map(slot => {
+        const startStr = minutesToTime(slot.start);
+        const endStr = minutesToTime(slot.end);
+        const appt = currentAppointments.find(a => a.start_time === startStr);
+        if (appt) {
+            const patient = allPatients.find(p => p.id === appt.patient_id);
+            return `<div style="display:flex;align-items:center;justify-content:space-between;padding:14px;border-bottom:1px solid #f1f5f9;background:#eff6ff;">
+                <div><strong>${startStr} – ${endStr}</strong> &nbsp; 👤 ${escapeHtml(patient ? patient.name : ('Paciente #' + appt.patient_id))}</div>
+                <button class="btn-primary" style="background:#991b1b;padding:6px 14px;font-size:0.8rem;" onclick="cancelAppointment(${appt.id})">❌ Cancelar</button>
+            </div>`;
+        }
+        return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px;border-bottom:1px solid #f1f5f9;flex-wrap:wrap;">
+            <div style="font-weight:600;color:#94a3b8;">${startStr} – ${endStr} <span style="font-weight:400;">(livre)</span></div>
+            <div style="display:flex;gap:10px;">
+                <select id="slotPatient-${slot.start}" style="width:220px;">${patientOptions}</select>
+                <button class="btn-primary" style="padding:8px 16px;font-size:0.85rem;" onclick="bookSlot(${slot.start}, '${startStr}')">📅 Agendar</button>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+async function bookSlot(startMin, startTime) {
+    const profId = document.getElementById('agendaProfessionalSelect').value;
+    const date = document.getElementById('agendaDate').value;
+    const select = document.getElementById(`slotPatient-${startMin}`);
+    const patientId = select.value;
+    if (!patientId) return alert('Selecione um paciente.');
+    const res = await api('/api/appointments', 'POST', { patient_id: Number(patientId), professional_id: Number(profId), date, start_time: startTime });
+    if (res.error) { showStatus('❌ ' + res.error, true); return; }
+    showStatus('✅ Atendimento agendado!');
+    loadAgenda();
+}
+
+async function cancelAppointment(id) {
+    if (!confirm('Cancelar este agendamento?')) return;
+    await api(`/api/appointments/${id}`, 'DELETE');
+    showStatus('✅ Agendamento cancelado.');
+    loadAgenda();
 }
 
 function renderPatientsTable(filter='') {
@@ -256,6 +525,7 @@ async function loadProntuario() {
 
     currentNotes = await api(`/api/notes/${pid}`);
     renderNotesHistory();
+    document.getElementById('noteProfessionalSelect').value = '';
     document.getElementById('appointmentDateTime').value = nowLocalDatetimeString();
     document.getElementById('newNoteContent').value = '';
     content.style.display = 'block';
@@ -269,7 +539,8 @@ function renderNotesHistory() {
     }
     container.innerHTML = currentNotes.map(n => `
         <div style="padding:16px 0;border-bottom:1px solid #f1f5f9;">
-            <div style="font-weight:700;color:var(--primary);font-size:0.9rem;margin-bottom:6px;">${new Date(n.appointment_at).toLocaleString('pt-BR')}</div>
+            <div style="font-weight:700;color:var(--primary);font-size:0.9rem;margin-bottom:2px;">${new Date(n.appointment_at).toLocaleString('pt-BR')}</div>
+            <div style="font-size:0.8rem;color:#64748b;margin-bottom:8px;">👨‍⚕️ ${escapeHtml(professionalLabel(n.professional_id))}</div>
             <div style="white-space:pre-wrap;font-size:0.9rem;color:#334155;">${escapeHtml(n.content)}</div>
         </div>
     `).join('');
@@ -278,12 +549,15 @@ function renderNotesHistory() {
 async function saveNote() {
     const pid = document.getElementById('prontPatientSelect').value;
     if(!pid) return;
+    const professionalId = document.getElementById('noteProfessionalSelect').value;
     const appointmentAt = document.getElementById('appointmentDateTime').value;
     const content = document.getElementById('newNoteContent').value.trim();
+    if(!professionalId) return alert('Selecione o profissional responsável pelo atendimento.');
     if(!appointmentAt) return alert('Informe a data e hora do atendimento.');
     if(!content) return alert('Escreva o conteúdo do atendimento.');
-    await api(`/api/notes/${pid}`, 'POST', { appointment_at: appointmentAt, content });
+    await api(`/api/notes/${pid}`, 'POST', { appointment_at: appointmentAt, content, professional_id: Number(professionalId) });
     showStatus('✅ Atendimento salvo no banco de dados!');
+    document.getElementById('noteProfessionalSelect').value = '';
     document.getElementById('newNoteContent').value = '';
     document.getElementById('appointmentDateTime').value = nowLocalDatetimeString();
     currentNotes = await api(`/api/notes/${pid}`);
@@ -312,7 +586,8 @@ function generatePeriodPdf() {
     const patientMeta = document.getElementById('prontMeta').textContent;
     const itemsHtml = filtered.map(n => `
         <div style="margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid #e2e8f0;">
-            <div style="font-weight:700;color:#2563eb;margin-bottom:6px;">${new Date(n.appointment_at).toLocaleString('pt-BR')}</div>
+            <div style="font-weight:700;color:#2563eb;margin-bottom:2px;">${new Date(n.appointment_at).toLocaleString('pt-BR')}</div>
+            <div style="font-size:0.85rem;color:#64748b;margin-bottom:8px;">Profissional: ${escapeHtml(professionalLabel(n.professional_id))}</div>
             <div style="white-space:pre-wrap;">${escapeHtml(n.content)}</div>
         </div>
     `).join('');
@@ -338,6 +613,7 @@ function generatePeriodPdf() {
     setTimeout(() => win.print(), 300);
 }
 
+renderModulesChecklist([]);
 refreshLists();
 </script>
 </body>
