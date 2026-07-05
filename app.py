@@ -31,6 +31,7 @@ def init_db():
             name TEXT NOT NULL,
             dob TEXT,
             contact TEXT,
+            patient_since TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS tests (
@@ -45,6 +46,15 @@ def init_db():
         );
     ''')
     conn.commit()
+
+    # Bancos criados antes do campo "paciente desde" existir não têm essa
+    # coluna. Adiciona e faz um valor razoável (data de cadastro) para quem
+    # já estava na base, já que a data real de início não é conhecida.
+    patient_cols = [r['name'] for r in conn.execute("PRAGMA table_info(patients)").fetchall()]
+    if 'patient_since' not in patient_cols:
+        conn.execute('ALTER TABLE patients ADD COLUMN patient_since TEXT')
+        conn.execute("UPDATE patients SET patient_since = date(created_at) WHERE patient_since IS NULL")
+        conn.commit()
 
     # A tabela `notes` mudou de "1 nota mutável por paciente" para "vários
     # atendimentos imutáveis, com data/hora". Se o banco já existir com o
@@ -84,15 +94,19 @@ def get_patients():
 @app.route('/api/patients', methods=['POST'])
 def add_patient():
     data = request.json
+    name = (data.get('name') or '').strip()
+    patient_since = (data.get('patient_since') or '').strip()
+    if not name or not patient_since:
+        return jsonify({'error': 'name e patient_since são obrigatórios'}), 400
     conn = get_db()
     cursor = conn.execute(
-        'INSERT INTO patients (name, dob, contact) VALUES (?, ?, ?)',
-        (data['name'], data.get('dob'), data.get('contact'))
+        'INSERT INTO patients (name, dob, contact, patient_since) VALUES (?, ?, ?, ?)',
+        (name, data.get('dob'), data.get('contact'), patient_since)
     )
     conn.commit()
     new_id = cursor.lastrowid
     conn.close()
-    return jsonify({'id': new_id, **data}), 201
+    return jsonify({'id': new_id, 'name': name, 'dob': data.get('dob'), 'contact': data.get('contact'), 'patient_since': patient_since}), 201
 
 @app.route('/api/tests', methods=['POST'])
 def save_test():

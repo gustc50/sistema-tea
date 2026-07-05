@@ -67,14 +67,15 @@
                 <div class="form-grid">
                     <div class="form-full"><label>Nome Completo</label><input type="text" id="pName"></div>
                     <div><label>Data de Nascimento</label><input type="date" id="pDob"></div>
-                    <div><label>Contato</label><input type="tel" id="pContact"></div>
+                    <div><label>Paciente Desde *</label><input type="date" id="pSince" required></div>
+                    <div class="form-full"><label>Contato</label><input type="tel" id="pContact"></div>
                     <div class="form-full"><button class="btn-primary" onclick="savePatient()">💾 Salvar Paciente</button></div>
                 </div>
             </div>
             <div class="card">
                 <label>Pacientes Cadastrados</label>
                 <div class="search-box"><span>🔍</span><input type="text" id="patientSearch" placeholder="Buscar paciente pelo nome..." oninput="renderPatientsTable(this.value)"></div>
-                <table><thead><tr><th>Nome</th><th>Nascimento</th><th>Contato</th><th></th></tr></thead><tbody id="patientsTableBody"></tbody></table>
+                <table><thead><tr><th>Nome</th><th>Nascimento</th><th>Contato</th><th>Paciente Desde</th><th></th></tr></thead><tbody id="patientsTableBody"></tbody></table>
             </div>
         </div>
 
@@ -187,24 +188,26 @@ async function refreshLists() {
 function renderPatientsTable(filter='') {
     const tbody = document.getElementById('patientsTableBody');
     if (!allPatients.length) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:30px;">Nenhum paciente.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:30px;">Nenhum paciente.</td></tr>';
         return;
     }
     const f = filter.trim().toLowerCase();
     const filtered = f ? allPatients.filter(p => p.name.toLowerCase().includes(f)) : allPatients;
     if (!filtered.length) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:30px;">Nenhum paciente encontrado.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#94a3b8;padding:30px;">Nenhum paciente encontrado.</td></tr>';
         return;
     }
-    tbody.innerHTML = filtered.map(p => `<tr class="patient-row" onclick="openProntuario(${p.id})"><td><strong>${escapeHtml(p.name)}</strong></td><td>${escapeHtml(p.dob)||'-'}</td><td>${escapeHtml(p.contact)||'-'}</td><td class="row-action">📂 Ver prontuário</td></tr>`).join('');
+    tbody.innerHTML = filtered.map(p => `<tr class="patient-row" onclick="openProntuario(${p.id})"><td><strong>${escapeHtml(p.name)}</strong></td><td>${escapeHtml(p.dob)||'-'}</td><td>${escapeHtml(p.contact)||'-'}</td><td>${escapeHtml(p.patient_since)||'-'}</td><td class="row-action">📂 Ver prontuário</td></tr>`).join('');
 }
 
 async function savePatient() {
     const name = document.getElementById('pName').value.trim();
+    const patientSince = document.getElementById('pSince').value;
     if(!name) return alert('Nome obrigatório');
-    await api('/api/patients', 'POST', { name, dob: document.getElementById('pDob').value, contact: document.getElementById('pContact').value });
+    if(!patientSince) return alert('Informe a data "Paciente Desde".');
+    await api('/api/patients', 'POST', { name, dob: document.getElementById('pDob').value, contact: document.getElementById('pContact').value, patient_since: patientSince });
     showStatus('✅ Paciente salvo no banco de dados!');
-    document.getElementById('pName').value = ''; document.getElementById('pDob').value = ''; document.getElementById('pContact').value = '';
+    document.getElementById('pName').value = ''; document.getElementById('pDob').value = ''; document.getElementById('pContact').value = ''; document.getElementById('pSince').value = '';
     refreshLists();
 }
 
@@ -241,7 +244,7 @@ async function loadProntuario() {
     const patients = await api('/api/patients');
     const p = patients.find(x => x.id == pid);
     document.getElementById('prontName').textContent = p.name;
-    document.getElementById('prontMeta').textContent = `Nasc: ${p.dob||'-'} | Contato: ${p.contact||'-'} | ID: #${p.id}`;
+    document.getElementById('prontMeta').textContent = `Nasc: ${p.dob||'-'} | Contato: ${p.contact||'-'} | Paciente desde: ${p.patient_since||'-'} | ID: #${p.id}`;
 
     const tests = await api(`/api/tests/${pid}`);
     const tbody = document.getElementById('testHistoryTable');
@@ -318,12 +321,14 @@ function generatePeriodPdf() {
             body{font-family:'Segoe UI',system-ui,sans-serif;color:#334155;padding:40px;}
             h1{font-size:1.4rem;border-bottom:2px solid #e2e8f0;padding-bottom:10px;margin-bottom:5px;}
             .meta{color:#64748b;margin-bottom:5px;}
-            .period{color:#64748b;margin-bottom:25px;font-size:0.9rem;}
+            .period{color:#64748b;margin-bottom:5px;font-size:0.9rem;}
+            .count{color:#64748b;margin-bottom:25px;font-size:0.9rem;font-weight:700;}
         </style></head>
         <body>
             <h1>${escapeHtml(patientName)}</h1>
             <p class="meta">${escapeHtml(patientMeta)}</p>
             <p class="period">Atendimentos de ${fromDate.toLocaleDateString('pt-BR')} a ${new Date(to+'T00:00:00').toLocaleDateString('pt-BR')} — emitido em ${new Date().toLocaleString('pt-BR')}</p>
+            <p class="count">Atendimentos no período: ${filtered.length}</p>
             ${itemsHtml}
         </body></html>`;
     const win = window.open('', '_blank');
