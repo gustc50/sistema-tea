@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Conciliador Bancário - Domínio</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏦</text></svg>">
+    <style>
+        :root { --primary: #0f766e; --primary-dark: #115e59; --sidebar: #1e293b; --bg: #f1f5f9; --card: #fff; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, sans-serif; outline: none; }
+        body { background: var(--bg); display: flex; height: 100vh; overflow: hidden; color: #334155; }
+        aside { width: 250px; background: var(--sidebar); color: white; display: flex; flex-direction: column; padding: 20px; flex-shrink: 0; }
+        aside h2 { font-size: 1.15rem; margin-bottom: 30px; display: flex; align-items: center; gap: 10px; }
+        aside button { background: transparent; border: none; color: #94a3b8; text-align: left; padding: 12px 15px; border-radius: 8px; cursor: pointer; font-size: 0.95rem; transition: all 0.2s; margin-bottom: 5px; display: flex; align-items: center; gap: 10px; }
+        aside button:hover { background: rgba(255,255,255,0.1); color: white; }
+        aside button.active { background: var(--primary); color: white; font-weight: 600; }
+        main { flex: 1; padding: 35px 40px; overflow-y: auto; }
+        .tab-content { display: none; animation: fadeIn 0.3s ease; max-width: 1250px; margin: 0 auto; }
+        .tab-content.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        h1 { font-size: 1.7rem; margin-bottom: 8px; color: var(--sidebar); }
+        p.sub { color: #64748b; margin-bottom: 25px; font-size: 0.9rem; }
+        .card { background: var(--card); padding: 25px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid #e2e8f0; }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+        .form-grid.duas { grid-template-columns: 1fr 1fr; }
+        .form-full { grid-column: 1 / -1; }
+        label { display: block; margin-bottom: 6px; font-weight: 600; font-size: 0.8rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+        input, select, textarea { width: 100%; padding: 9px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9rem; transition: border 0.2s; background: #f8fafc; }
+        input:focus, select:focus, textarea:focus { border-color: var(--primary); background: white; box-shadow: 0 0 0 3px rgba(15,118,110,0.12); }
+        input[type=checkbox] { width: auto; }
+        button.btn-primary { background: var(--primary); color: white; border: none; padding: 11px 22px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 0.2s; font-size: 0.9rem; }
+        button.btn-primary:hover { background: var(--primary-dark); }
+        button.btn-primary:disabled { background: #94a3b8; cursor: not-allowed; }
+        button.btn-sec { background: #e2e8f0; color: #334155; border: none; padding: 11px 18px; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.9rem; }
+        button.btn-sec:hover { background: #cbd5e1; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th { text-align: left; padding: 10px 8px; background: #f8fafc; font-size: 0.72rem; color: #64748b; text-transform: uppercase; border-bottom: 2px solid #e2e8f0; white-space: nowrap; }
+        td { padding: 9px 8px; border-bottom: 1px solid #f1f5f9; font-size: 0.86rem; vertical-align: middle; }
+        tr:hover td { background: #f8fafc; }
+        tr.dup td { background: #fef9c3; }
+        tr.ignorada td { opacity: 0.45; }
+        .badge { padding: 3px 9px; border-radius: 20px; font-size: 0.7rem; font-weight: 700; white-space: nowrap; }
+        .badge-entrada { background: #dcfce7; color: #166534; }
+        .badge-saida { background: #fee2e2; color: #991b1b; }
+        .badge-regra { background: #e0f2fe; color: #075985; }
+        .badge-dup { background: #fef08a; color: #854d0e; }
+        .badge-padrao { background: #f3e8ff; color: #6b21a8; }
+        .valor-pos { color: #15803d; font-weight: 600; white-space: nowrap; }
+        .valor-neg { color: #b91c1c; font-weight: 600; white-space: nowrap; }
+        .status-bar { position: fixed; bottom: 0; right: 0; background: #166534; color: white; padding: 10px 22px; border-radius: 8px 0 0 0; font-size: 0.85rem; display: none; z-index: 999; max-width: 60%; }
+        .status-bar.erro { background: #991b1b; }
+        .search-box { position: relative; margin-bottom: 15px; }
+        .search-box input { padding-left: 36px; }
+        .search-box span { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #94a3b8; }
+        .row-action { color: var(--primary); font-weight: 600; font-size: 0.82rem; white-space: nowrap; cursor: pointer; background: none; border: none; padding: 2px 6px; }
+        .row-action.excluir { color: #b91c1c; }
+        .resumo-extrato { display: flex; flex-wrap: wrap; gap: 22px; padding: 16px 20px; background: linear-gradient(135deg, #f0fdfa 0%, #ffffff 100%); border: 1px solid #99f6e4; border-radius: 10px; margin-bottom: 16px; font-size: 0.87rem; }
+        .resumo-extrato b { color: var(--sidebar); display: block; font-size: 0.72rem; text-transform: uppercase; color: #64748b; margin-bottom: 2px; }
+        .totais { display: flex; gap: 25px; align-items: center; flex-wrap: wrap; margin-top: 14px; padding-top: 14px; border-top: 2px solid #e2e8f0; }
+        .totais .num { font-size: 1.05rem; font-weight: 700; }
+        td input, td select { padding: 6px 8px; font-size: 0.83rem; }
+        .col-conta { min-width: 150px; }
+        .col-hist { width: 75px; }
+        .dica { font-size: 0.8rem; color: #94a3b8; margin-top: 8px; line-height: 1.5; }
+        .drop-area { border: 2px dashed #cbd5e1; border-radius: 10px; padding: 22px; text-align: center; color: #64748b; cursor: pointer; transition: all .2s; background: #f8fafc; }
+        .drop-area:hover, .drop-area.over { border-color: var(--primary); background: #f0fdfa; }
+        .desc-conta { font-size: 0.72rem; color: #64748b; display: block; margin-top: 2px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    </style>
+</head>
+<body>
+    <aside>
+        <h2>🏦 Conciliador Bancário</h2>
+        <button onclick="switchTab('conciliar')" class="active" id="nav-conciliar">📥 Conciliar Extrato</button>
+        <button onclick="switchTab('plano')" id="nav-plano">📚 Plano de Contas</button>
+        <button onclick="switchTab('bancos')" id="nav-bancos">💳 Contas Bancárias</button>
+        <button onclick="switchTab('regras')" id="nav-regras">⚡ Regras Especiais</button>
+        <button onclick="switchTab('historico')" id="nav-historico">🗂️ Importações</button>
+        <button onclick="switchTab('config')" id="nav-config">⚙️ Configurações</button>
+        <div style="margin-top:auto; font-size:0.72rem; color:#64748b; padding:10px; line-height:1.6;">
+            Gera lançamentos p/ Domínio Contábil<br>OFX e PDF: Sicoob, Sicredi, Itaú, Inter, Caixa, BB, Santander
+        </div>
+    </aside>
+
+    <main>
+        <!-- ============ CONCILIAR ============ -->
+        <div id="tab-conciliar" class="tab-content active">
+            <h1>Conciliar Extrato</h1>
+            <p class="sub">Envie o extrato OFX ou PDF, confira a classificação sugerida e gere o arquivo de lançamentos do Domínio.</p>
+            <div class="card">
+                <div class="form-grid">
+                    <div class="form-full">
+                        <div class="drop-area" id="dropArea" onclick="document.getElementById('arquivoInput').click()">
+                            <span id="dropTexto">📄 Clique ou arraste aqui o arquivo <b>.ofx</b> ou <b>.pdf</b> do extrato</span>
+                        </div>
+                        <input type="file" id="arquivoInput" accept=".ofx,.qfx,.pdf" style="display:none" onchange="arquivoSelecionado(this.files[0])">
+                    </div>
+                    <div>
+                        <label>Conta Bancária do Extrato</label>
+                        <select id="concContaBancaria"><option value="">— detectar automaticamente —</option></select>
+                    </div>
+                    <div style="display:flex; align-items:flex-end; gap:10px;">
+                        <button class="btn-primary" id="btnProcessar" onclick="processarArquivo()" disabled>🔎 Processar Extrato</button>
+                        <button class="btn-sec" id="btnReprocessar" onclick="processarArquivo()" style="display:none">↻ Reaplicar regras</button>
+                    </div>
+                </div>
+            </div>
+
+            <div id="areaResultado" style="display:none">
+                <div class="resumo-extrato" id="resumoExtrato"></div>
+                <div class="card" style="overflow-x:auto">
+                    <table>
+                        <thead><tr>
+                            <th title="Marcadas serão lançadas">✔</th><th>Data</th><th>Descrição</th><th>Doc.</th>
+                            <th style="text-align:right">Valor</th><th>Classificação</th>
+                            <th class="col-conta">Conta Contábil</th><th class="col-hist">Hist.</th>
+                            <th>Complemento</th><th></th>
+                        </tr></thead>
+                        <tbody id="tbodyTransacoes"></tbody>
+                    </table>
+                    <div class="totais">
+                        <div><b style="font-size:.72rem;color:#64748b;text-transform:uppercase">Selecionadas</b><div class="num" id="totSel">0</div></div>
+                        <div><b style="font-size:.72rem;color:#64748b;text-transform:uppercase">Entradas</b><div class="num valor-pos" id="totEnt">R$ 0,00</div></div>
+                        <div><b style="font-size:.72rem;color:#64748b;text-transform:uppercase">Saídas</b><div class="num valor-neg" id="totSai">R$ 0,00</div></div>
+                        <div style="margin-left:auto; display:flex; gap:10px;">
+                            <button class="btn-primary" onclick="exportarDominio()">📤 Gerar arquivo Domínio (.txt)</button>
+                        </div>
+                    </div>
+                    <p class="dica">Linhas amarelas já foram exportadas antes (possível duplicidade) e vêm desmarcadas.
+                    Entrada: débito na conta do banco e crédito na conta informada; saída: o inverso.
+                    Sem conta contábil preenchida, será usada a conta padrão das Configurações (se houver).</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ PLANO DE CONTAS ============ -->
+        <div id="tab-plano" class="tab-content">
+            <h1>Plano de Contas</h1>
+            <p class="sub">Cadastre as contas com o mesmo <b>código</b> usado nos lançamentos do Domínio.</p>
+            <div class="card">
+                <label>Importar em massa (cole do Excel/Domínio — uma conta por linha: código;descrição)</label>
+                <textarea id="planoTexto" rows="6" placeholder="5;BANCO SICOOB C/ MOVIMENTO&#10;310;RECEITA DE SERVIÇOS&#10;520;ENERGIA ELÉTRICA"></textarea>
+                <div style="display:flex; gap:14px; align-items:center; margin-top:12px;">
+                    <button class="btn-primary" onclick="importarPlano()">📥 Importar contas</button>
+                    <label style="text-transform:none; font-size:.85rem; display:flex; align-items:center; gap:6px; margin:0;">
+                        <input type="checkbox" id="planoSubstituir"> Substituir plano atual (apaga o existente)
+                    </label>
+                </div>
+            </div>
+            <div class="card">
+                <div class="form-grid" style="grid-template-columns: 160px 1fr auto; align-items:end;">
+                    <div><label>Código</label><input id="pcCodigo" placeholder="Ex.: 520"></div>
+                    <div><label>Descrição</label><input id="pcDescricao" placeholder="Ex.: ENERGIA ELÉTRICA"></div>
+                    <div><button class="btn-primary" onclick="addContaPlano()">＋ Adicionar</button></div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="search-box"><span>🔍</span><input id="planoBusca" placeholder="Buscar por código ou descrição..." oninput="renderPlano()"></div>
+                <table><thead><tr><th>Código</th><th>Descrição</th><th></th></tr></thead><tbody id="tbodyPlano"></tbody></table>
+                <p class="dica" id="planoQtd"></p>
+            </div>
+        </div>
+
+        <!-- ============ CONTAS BANCÁRIAS ============ -->
+        <div id="tab-bancos" class="tab-content">
+            <h1>Contas Bancárias</h1>
+            <p class="sub">Cada conta bancária da empresa e a conta contábil correspondente no plano. É a conta usada como contrapartida do banco em todos os lançamentos.</p>
+            <div class="card">
+                <div class="form-grid">
+                    <div><label>Descrição</label><input id="cbDescricao" placeholder="Ex.: Sicoob C/C principal"></div>
+                    <div><label>Banco</label><select id="cbBanco"></select></div>
+                    <div><label>Conta Contábil no Plano *</label><input id="cbContaContabil" list="dlPlano" placeholder="código da conta" onchange="mostrarDescConta(this)"><span class="desc-conta" id="cbContaDesc"></span></div>
+                    <div><label>Agência</label><input id="cbAgencia" placeholder="opcional"></div>
+                    <div><label>Nº da Conta</label><input id="cbNumero" placeholder="opcional — ajuda a detectar o extrato"></div>
+                    <div style="display:flex;align-items:flex-end"><button class="btn-primary" onclick="addContaBancaria()">＋ Adicionar Conta</button></div>
+                </div>
+            </div>
+            <div class="card">
+                <table><thead><tr><th>Descrição</th><th>Banco</th><th>Agência</th><th>Conta</th><th>Conta Contábil</th><th></th></tr></thead><tbody id="tbodyBancos"></tbody></table>
+            </div>
+        </div>
+
+        <!-- ============ REGRAS ============ -->
+        <div id="tab-regras" class="tab-content">
+            <h1>Regras — Situações Especiais</h1>
+            <p class="sub">Quando uma transação casar com os critérios, ela é lançada na conta indicada. A primeira regra que casar (menor prioridade primeiro) vence.</p>
+            <div class="card">
+                <input type="hidden" id="rgId">
+                <div class="form-grid">
+                    <div><label>Nome da Regra *</label><input id="rgNome" placeholder="Ex.: Tarifas bancárias"></div>
+                    <div><label>Prioridade (menor = avaliada antes)</label><input id="rgPrioridade" type="number" value="100"></div>
+                    <div><label>Tipo de Movimento</label>
+                        <select id="rgTipo"><option value="ambos">Entradas e saídas</option><option value="entrada">Só entradas</option><option value="saida">Só saídas</option></select>
+                    </div>
+                    <div class="form-full"><label>Quando a descrição contiver (vários termos separados por ";" — qualquer um serve)</label>
+                        <input id="rgCriterio" placeholder="Ex.: TARIFA;TAR PACOTE;MANUTENCAO CONTA">
+                        <label style="text-transform:none; font-size:.8rem; display:flex; align-items:center; gap:6px; margin-top:6px;">
+                            <input type="checkbox" id="rgRegex"> Interpretar como expressão regular
+                        </label>
+                    </div>
+                    <div><label>Valor Mínimo (R$)</label><input id="rgValorMin" type="number" step="0.01" placeholder="opcional"></div>
+                    <div><label>Valor Máximo (R$)</label><input id="rgValorMax" type="number" step="0.01" placeholder="opcional"></div>
+                    <div><label>Somente na Conta Bancária</label><select id="rgContaBancaria"><option value="">Todas</option></select></div>
+                    <div><label>Conta Contábil de Destino *</label><input id="rgContaContabil" list="dlPlano" placeholder="código no plano" onchange="mostrarDescConta(this)"><span class="desc-conta" id="rgContaDesc"></span></div>
+                    <div><label>Código do Histórico (Domínio)</label><input id="rgHistorico" placeholder="opcional"></div>
+                    <div><label>Modelo de Complemento</label><input id="rgComplemento" placeholder="{descricao} — aceita {documento} {data} {valor}"></div>
+                    <div class="form-full" style="display:flex; gap:10px;">
+                        <button class="btn-primary" onclick="salvarRegra()" id="btnSalvarRegra">💾 Salvar Regra</button>
+                        <button class="btn-sec" onclick="limparFormRegra()" id="btnCancelarRegra" style="display:none">Cancelar edição</button>
+                    </div>
+                </div>
+            </div>
+            <div class="card" style="overflow-x:auto">
+                <table><thead><tr><th>Prior.</th><th>Nome</th><th>Critério</th><th>Tipo</th><th>Faixa de Valor</th><th>Conta Banco</th><th>→ Conta</th><th>Hist.</th><th>Ativa</th><th></th></tr></thead><tbody id="tbodyRegras"></tbody></table>
+            </div>
+        </div>
+
+        <!-- ============ IMPORTAÇÕES ============ -->
+        <div id="tab-historico" class="tab-content">
+            <h1>Importações Realizadas</h1>
+            <p class="sub">Arquivos já gerados para o Domínio. Excluir uma importação faz suas transações deixarem de ser marcadas como duplicadas.</p>
+            <div class="card" style="overflow-x:auto">
+                <table><thead><tr><th>#</th><th>Data</th><th>Arquivo</th><th>Formato</th><th>Banco</th><th>Conta</th><th>Período</th><th>Lanç.</th><th>Entradas</th><th>Saídas</th><th></th></tr></thead><tbody id="tbodyImportacoes"></tbody></table>
+            </div>
+        </div>
+
+        <!-- ============ CONFIGURAÇÕES ============ -->
+        <div id="tab-config" class="tab-content">
+            <h1>Configurações</h1>
+            <p class="sub">Dados usados na geração do arquivo de importação do Domínio.</p>
+            <div class="card">
+                <div class="form-grid">
+                    <div><label>CNPJ da Empresa *</label><input id="cfCnpj" placeholder="00.000.000/0000-00"></div>
+                    <div><label>Código da Filial (Domínio)</label><input id="cfFilial" placeholder="em branco = matriz"></div>
+                    <div><label>Conta Padrão p/ Não Identificados</label><input id="cfContaPadrao" list="dlPlano" placeholder="ex.: conta transitória" onchange="mostrarDescConta(this)"><span class="desc-conta" id="cfContaDesc"></span></div>
+                    <div><label>Cód. Histórico Padrão — Entradas</label><input id="cfHistEntrada" placeholder="ex.: 20"></div>
+                    <div><label>Cód. Histórico Padrão — Saídas</label><input id="cfHistSaida" placeholder="ex.: 55"></div>
+                    <div><label>Modelo Padrão de Complemento</label><input id="cfComplemento" placeholder="{descricao}"></div>
+                    <div class="form-full"><button class="btn-primary" onclick="salvarConfig()">💾 Salvar Configurações</button></div>
+                </div>
+                <p class="dica">O arquivo gerado usa o layout de lançamentos do Domínio: registros <b>|0000|CNPJ|</b>, <b>|6000|X|||</b> e
+                <b>|6100|data|débito|crédito|valor|histórico|complemento||filial|</b>, em codificação Windows-1252.
+                No Domínio, importe em: Utilitários &gt; Importação &gt; Importação Padrão de Lançamentos.
+                Os códigos de histórico devem existir no cadastro de históricos da empresa no Domínio.</p>
+            </div>
+        </div>
+
+        <datalist id="dlPlano"></datalist>
+    </main>
+    <div class="status-bar" id="statusBar"></div>
+
+<script>
+let planoContas = [], contasBancarias = [], regras = [], bancosLista = [], config = {};
+let conciliacao = null;      // resultado do último processamento
+let arquivoAtual = null;     // File para reprocessar
+
+// ---------- utilidades ----------
+const $ = id => document.getElementById(id);
+function status(msg, erro) {
+    const bar = $('statusBar');
+    bar.textContent = msg;
+    bar.className = 'status-bar' + (erro ? ' erro' : '');
+    bar.style.display = 'block';
+    clearTimeout(bar._t);
+    bar._t = setTimeout(() => bar.style.display = 'none', erro ? 8000 : 4000);
+}
+async function api(url, opts) {
+    const r = await fetch(url, opts);
+    let corpo = null;
+    const tipo = r.headers.get('content-type') || '';
+    if (tipo.includes('json')) corpo = await r.json();
+    if (!r.ok) throw new Error((corpo && corpo.error) || 'Erro na comunicação com o servidor');
+    return corpo;
+}
+const fmtMoeda = v => (v < 0 ? '-' : '') + 'R$ ' + Math.abs(v).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+const fmtData = iso => { if (!iso) return ''; const p = iso.split('-'); return p.length === 3 ? p[2] + '/' + p[1] + '/' + p[0] : iso; };
+const esc = t => (t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+function switchTab(aba) {
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('aside button').forEach(el => el.classList.remove('active'));
+    $('tab-' + aba).classList.add('active');
+    $('nav-' + aba).classList.add('active');
+}
+
+function descConta(codigo) {
+    const c = planoContas.find(x => x.codigo === String(codigo || '').trim());
+    return c ? c.descricao : '';
+}
+function mostrarDescConta(input) {
+    const span = $(input.id.replace(/(ContaContabil|ContaPadrao)$/, 'ContaDesc')) || $(input.id + 'Desc');
+    if (span) span.textContent = descConta(input.value);
+}
+
+// ---------- carga inicial ----------
+async function carregarTudo() {
+    [planoContas, contasBancarias, regras, bancosLista, config] = await Promise.all([
+        api('/api/plano-contas'), api('/api/contas-bancarias'), api('/api/regras'),
+        api('/api/bancos'), api('/api/config')
+    ]);
+    renderPlano(); renderBancos(); renderRegras(); renderDatalist();
+    renderSelectContas(); preencherConfig(); carregarImportacoes();
+    $('cbBanco').innerHTML = bancosLista.map(b => `<option value="${b.codigo}">${b.codigo} - ${b.nome}</option>`).join('');
+}
+function renderDatalist() {
+    $('dlPlano').innerHTML = planoContas.map(c =>
+        `<option value="${esc(c.codigo)}">${esc(c.codigo)} — ${esc(c.descricao)}</option>`).join('');
+}
+function renderSelectContas() {
+    const ops = contasBancarias.map(c => `<option value="${c.id}">${esc(c.descricao)} (${esc(c.banco_nome)})</option>`).join('');
+    $('concContaBancaria').innerHTML = '<option value="">— detectar automaticamente —</option>' + ops;
+    $('rgContaBancaria').innerHTML = '<option value="">Todas</option>' + ops;
+}
+
+// ---------- conciliar ----------
+const drop = $('dropArea');
+['dragover', 'dragenter'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', e => { if (e.dataTransfer.files.length) arquivoSelecionado(e.dataTransfer.files[0]); });
+
+function arquivoSelecionado(f) {
+    if (!f) return;
+    arquivoAtual = f;
+    $('dropTexto').innerHTML = '📄 <b>' + esc(f.name) + '</b> (' + (f.size / 1024).toFixed(0) + ' KB) — pronto para processar';
+    $('btnProcessar').disabled = false;
+}
+
+async function processarArquivo() {
+    if (!arquivoAtual) return status('Selecione um arquivo primeiro.', true);
+    const fd = new FormData();
+    fd.append('arquivo', arquivoAtual);
+    if ($('concContaBancaria').value) fd.append('conta_bancaria_id', $('concContaBancaria').value);
+    $('btnProcessar').disabled = true;
+    $('btnProcessar').textContent = '⏳ Processando...';
+    try {
+        conciliacao = await api('/api/processar', { method: 'POST', body: fd });
+        conciliacao.transacoes.forEach(t => { t.ignorar = !!t.duplicada; });
+        if (conciliacao.conta_bancaria_id) $('concContaBancaria').value = conciliacao.conta_bancaria_id;
+        renderConciliacao();
+        $('btnReprocessar').style.display = 'inline-block';
+        status('Extrato processado: ' + conciliacao.transacoes.length + ' transações.');
+    } catch (e) { status(e.message, true); }
+    $('btnProcessar').disabled = false;
+    $('btnProcessar').textContent = '🔎 Processar Extrato';
+}
+
+function renderConciliacao() {
+    const c = conciliacao;
+    $('areaResultado').style.display = 'block';
+    const dups = c.transacoes.filter(t => t.duplicada).length;
+    $('resumoExtrato').innerHTML = `
+        <div><b>Arquivo</b>${esc(c.arquivo_nome)} (${c.formato})</div>
+        <div><b>Banco</b>${esc(c.banco_nome)}${c.banco_codigo ? ' (' + c.banco_codigo + ')' : ''}</div>
+        <div><b>Conta no extrato</b>${esc(c.agencia_extrato || '-')} / ${esc(c.conta_extrato || '-')}</div>
+        <div><b>Período</b>${fmtData(c.periodo_inicio)} a ${fmtData(c.periodo_fim)}</div>
+        ${c.saldo_final != null ? `<div><b>Saldo final (OFX)</b>${fmtMoeda(c.saldo_final)}</div>` : ''}
+        ${dups ? `<div><b>Já importadas</b><span class="badge badge-dup">${dups}</span></div>` : ''}
+        ${!c.conta_bancaria_id ? '<div><b>⚠ Conta bancária</b>não identificada — selecione acima</div>' : ''}`;
+    const tb = $('tbodyTransacoes');
+    tb.innerHTML = c.transacoes.map((t, i) => `
+        <tr class="${t.duplicada ? 'dup ' : ''}${t.ignorar ? 'ignorada' : ''}" id="linha${i}">
+            <td><input type="checkbox" ${t.ignorar ? '' : 'checked'} onchange="conciliacao.transacoes[${i}].ignorar=!this.checked; document.getElementById('linha${i}').classList.toggle('ignorada', !this.checked); atualizarTotais()"></td>
+            <td style="white-space:nowrap">${fmtData(t.data)}</td>
+            <td title="${esc(t.descricao)}" style="max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${esc(t.descricao)}
+                ${t.duplicada ? '<span class="badge badge-dup">já importada</span>' : ''}</td>
+            <td>${esc(t.documento)}</td>
+            <td style="text-align:right" class="${t.valor >= 0 ? 'valor-pos' : 'valor-neg'}">${fmtMoeda(t.valor)}</td>
+            <td>${t.regra_id ? `<span class="badge badge-regra" title="Regra aplicada">⚡ ${esc(t.regra_nome)}</span>`
+                : (t.regra_nome ? `<span class="badge badge-padrao">${esc(t.regra_nome)}</span>`
+                : `<span class="badge ${t.tipo === 'entrada' ? 'badge-entrada' : 'badge-saida'}">${t.tipo === 'entrada' ? 'entrada' : 'saída'}</span>`)}</td>
+            <td class="col-conta"><input list="dlPlano" value="${esc(t.conta_contabil)}" title="${esc(descConta(t.conta_contabil))}"
+                onchange="conciliacao.transacoes[${i}].conta_contabil=this.value.trim(); this.title=descConta(this.value)"></td>
+            <td class="col-hist"><input value="${esc(t.codigo_historico)}" onchange="conciliacao.transacoes[${i}].codigo_historico=this.value.trim()"></td>
+            <td><input value="${esc(t.complemento)}" onchange="conciliacao.transacoes[${i}].complemento=this.value"></td>
+            <td><button class="row-action" title="Criar regra a partir desta transação" onclick="criarRegraDaTransacao(${i})">＋regra</button></td>
+        </tr>`).join('');
+    atualizarTotais();
+}
+
+function atualizarTotais() {
+    if (!conciliacao) return;
+    const sel = conciliacao.transacoes.filter(t => !t.ignorar);
+    $('totSel').textContent = sel.length + ' / ' + conciliacao.transacoes.length;
+    $('totEnt').textContent = fmtMoeda(sel.filter(t => t.tipo === 'entrada').reduce((s, t) => s + t.valor, 0));
+    $('totSai').textContent = fmtMoeda(-sel.filter(t => t.tipo === 'saida').reduce((s, t) => s + Math.abs(t.valor), 0));
+}
+
+function criarRegraDaTransacao(i) {
+    const t = conciliacao.transacoes[i];
+    limparFormRegra();
+    $('rgNome').value = (t.descricao || '').slice(0, 40);
+    $('rgCriterio').value = t.descricao || '';
+    $('rgTipo').value = t.tipo;
+    $('rgContaContabil').value = t.conta_contabil || '';
+    mostrarDescConta($('rgContaContabil'));
+    $('rgHistorico').value = t.codigo_historico || '';
+    switchTab('regras');
+    $('rgNome').focus();
+    status('Ajuste o critério da regra (deixe só o trecho que se repete na descrição) e salve.');
+}
+
+async function exportarDominio() {
+    if (!conciliacao) return;
+    const contaBancariaId = $('concContaBancaria').value || conciliacao.conta_bancaria_id;
+    if (!contaBancariaId) return status('Selecione a conta bancária do extrato antes de exportar.', true);
+    const payload = {
+        conta_bancaria_id: parseInt(contaBancariaId),
+        arquivo_nome: conciliacao.arquivo_nome, formato: conciliacao.formato,
+        banco_codigo: conciliacao.banco_codigo, banco_nome: conciliacao.banco_nome,
+        periodo_inicio: conciliacao.periodo_inicio, periodo_fim: conciliacao.periodo_fim,
+        transacoes: conciliacao.transacoes,
+    };
+    try {
+        const r = await fetch('/api/exportar', { method: 'POST',
+            headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        if (!r.ok) { const e = await r.json(); throw new Error(e.error || 'Falha na exportação'); }
+        const nome = ((r.headers.get('Content-Disposition') || '').match(/filename="(.+)"/) || [])[1] || 'dominio_lancamentos.txt';
+        const blob = await r.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = nome; a.click();
+        URL.revokeObjectURL(a.href);
+        status('Arquivo ' + nome + ' gerado. Importe no Domínio em Utilitários > Importação.');
+        conciliacao.transacoes.forEach(t => { if (!t.ignorar) t.duplicada = true; });
+        carregarImportacoes();
+    } catch (e) { status(e.message, true); }
+}
+
+// ---------- plano de contas ----------
+function renderPlano() {
+    const busca = ($('planoBusca').value || '').toLowerCase();
+    const lista = planoContas.filter(c => !busca || c.codigo.toLowerCase().includes(busca) || c.descricao.toLowerCase().includes(busca));
+    $('tbodyPlano').innerHTML = lista.slice(0, 500).map(c => `
+        <tr><td><b>${esc(c.codigo)}</b></td><td>${esc(c.descricao)}</td>
+        <td><button class="row-action excluir" onclick="excluirContaPlano(${c.id})">excluir</button></td></tr>`).join('');
+    $('planoQtd').textContent = planoContas.length + ' conta(s) no plano' + (lista.length > 500 ? ' — mostrando as 500 primeiras da busca' : '');
+}
+async function importarPlano() {
+    try {
+        const r = await api('/api/plano-contas/importar', { method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ texto: $('planoTexto').value, substituir: $('planoSubstituir').checked }) });
+        status(`Plano importado: ${r.inseridas} inserida(s), ${r.atualizadas} atualizada(s).`);
+        $('planoTexto').value = ''; $('planoSubstituir').checked = false;
+        planoContas = await api('/api/plano-contas'); renderPlano(); renderDatalist();
+    } catch (e) { status(e.message, true); }
+}
+async function addContaPlano() {
+    try {
+        await api('/api/plano-contas', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ codigo: $('pcCodigo').value, descricao: $('pcDescricao').value }) });
+        $('pcCodigo').value = ''; $('pcDescricao').value = '';
+        planoContas = await api('/api/plano-contas'); renderPlano(); renderDatalist();
+        status('Conta adicionada.');
+    } catch (e) { status(e.message, true); }
+}
+async function excluirContaPlano(id) {
+    await api('/api/plano-contas/' + id, { method: 'DELETE' });
+    planoContas = await api('/api/plano-contas'); renderPlano(); renderDatalist();
+}
+
+// ---------- contas bancárias ----------
+function renderBancos() {
+    $('tbodyBancos').innerHTML = contasBancarias.map(c => `
+        <tr><td><b>${esc(c.descricao)}</b></td><td>${esc(c.banco_codigo)} - ${esc(c.banco_nome)}</td>
+        <td>${esc(c.agencia || '')}</td><td>${esc(c.numero_conta || '')}</td>
+        <td>${esc(c.conta_contabil)} <span class="desc-conta" style="display:inline">${esc(descConta(c.conta_contabil))}</span></td>
+        <td><button class="row-action excluir" onclick="excluirContaBancaria(${c.id})">excluir</button></td></tr>`).join('');
+}
+async function addContaBancaria() {
+    try {
+        await api('/api/contas-bancarias', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                descricao: $('cbDescricao').value, banco_codigo: $('cbBanco').value,
+                agencia: $('cbAgencia').value, numero_conta: $('cbNumero').value,
+                conta_contabil: $('cbContaContabil').value }) });
+        ['cbDescricao', 'cbAgencia', 'cbNumero', 'cbContaContabil'].forEach(id => $(id).value = '');
+        $('cbContaDesc').textContent = '';
+        contasBancarias = await api('/api/contas-bancarias'); renderBancos(); renderSelectContas();
+        status('Conta bancária cadastrada.');
+    } catch (e) { status(e.message, true); }
+}
+async function excluirContaBancaria(id) {
+    if (!confirm('Excluir esta conta bancária?')) return;
+    await api('/api/contas-bancarias/' + id, { method: 'DELETE' });
+    contasBancarias = await api('/api/contas-bancarias'); renderBancos(); renderSelectContas();
+}
+
+// ---------- regras ----------
+function renderRegras() {
+    $('tbodyRegras').innerHTML = regras.map(r => {
+        const cb = contasBancarias.find(c => c.id === r.conta_bancaria_id);
+        const faixa = (r.valor_min != null || r.valor_max != null)
+            ? (r.valor_min != null ? fmtMoeda(r.valor_min) : '...') + ' a ' + (r.valor_max != null ? fmtMoeda(r.valor_max) : '...') : '';
+        return `<tr style="${r.ativo ? '' : 'opacity:.45'}">
+            <td>${r.prioridade}</td><td><b>${esc(r.nome)}</b></td>
+            <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.criterio_texto)}">${r.usar_regex ? '<span class="badge badge-regra">regex</span> ' : ''}${esc(r.criterio_texto || '—')}</td>
+            <td>${r.tipo_movimento === 'ambos' ? 'ambos' : (r.tipo_movimento === 'entrada' ? '⬆ entrada' : '⬇ saída')}</td>
+            <td>${faixa}</td><td>${cb ? esc(cb.descricao) : 'Todas'}</td>
+            <td><b>${esc(r.conta_contabil)}</b> <span class="desc-conta" style="display:inline">${esc(descConta(r.conta_contabil))}</span></td>
+            <td>${esc(r.codigo_historico || '')}</td>
+            <td>${r.ativo ? '✅' : '⏸'}</td>
+            <td style="white-space:nowrap">
+                <button class="row-action" onclick="editarRegra(${r.id})">editar</button>
+                <button class="row-action" onclick="alternarRegra(${r.id})">${r.ativo ? 'pausar' : 'ativar'}</button>
+                <button class="row-action excluir" onclick="excluirRegra(${r.id})">excluir</button>
+            </td></tr>`;
+    }).join('');
+}
+function dadosFormRegra() {
+    return {
+        nome: $('rgNome').value, prioridade: $('rgPrioridade').value || 100,
+        criterio_texto: $('rgCriterio').value, usar_regex: $('rgRegex').checked,
+        tipo_movimento: $('rgTipo').value,
+        valor_min: $('rgValorMin').value !== '' ? parseFloat($('rgValorMin').value) : null,
+        valor_max: $('rgValorMax').value !== '' ? parseFloat($('rgValorMax').value) : null,
+        conta_bancaria_id: $('rgContaBancaria').value || null,
+        conta_contabil: $('rgContaContabil').value,
+        codigo_historico: $('rgHistorico').value,
+        complemento_modelo: $('rgComplemento').value, ativo: 1,
+    };
+}
+async function salvarRegra() {
+    const id = $('rgId').value;
+    try {
+        if (id) await api('/api/regras/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dadosFormRegra()) });
+        else await api('/api/regras', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dadosFormRegra()) });
+        limparFormRegra();
+        regras = await api('/api/regras'); renderRegras();
+        status('Regra salva. Reprocesse o extrato para aplicá-la.');
+    } catch (e) { status(e.message, true); }
+}
+function editarRegra(id) {
+    const r = regras.find(x => x.id === id); if (!r) return;
+    $('rgId').value = r.id; $('rgNome').value = r.nome; $('rgPrioridade').value = r.prioridade;
+    $('rgCriterio').value = r.criterio_texto || ''; $('rgRegex').checked = !!r.usar_regex;
+    $('rgTipo').value = r.tipo_movimento; $('rgValorMin').value = r.valor_min ?? '';
+    $('rgValorMax').value = r.valor_max ?? ''; $('rgContaBancaria').value = r.conta_bancaria_id || '';
+    $('rgContaContabil').value = r.conta_contabil; mostrarDescConta($('rgContaContabil'));
+    $('rgHistorico').value = r.codigo_historico || ''; $('rgComplemento').value = r.complemento_modelo || '';
+    $('btnSalvarRegra').textContent = '💾 Atualizar Regra'; $('btnCancelarRegra').style.display = 'inline-block';
+    window.scrollTo(0, 0);
+}
+function limparFormRegra() {
+    ['rgId', 'rgNome', 'rgCriterio', 'rgValorMin', 'rgValorMax', 'rgContaContabil', 'rgHistorico', 'rgComplemento'].forEach(id => $(id).value = '');
+    $('rgPrioridade').value = 100; $('rgTipo').value = 'ambos'; $('rgRegex').checked = false;
+    $('rgContaBancaria').value = ''; $('rgContaDesc').textContent = '';
+    $('btnSalvarRegra').textContent = '💾 Salvar Regra'; $('btnCancelarRegra').style.display = 'none';
+}
+async function alternarRegra(id) {
+    const r = regras.find(x => x.id === id); if (!r) return;
+    await api('/api/regras/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...r, usar_regex: !!r.usar_regex, ativo: r.ativo ? 0 : 1 }) });
+    regras = await api('/api/regras'); renderRegras();
+}
+async function excluirRegra(id) {
+    if (!confirm('Excluir esta regra?')) return;
+    await api('/api/regras/' + id, { method: 'DELETE' });
+    regras = await api('/api/regras'); renderRegras();
+}
+
+// ---------- importações ----------
+async function carregarImportacoes() {
+    const lista = await api('/api/importacoes');
+    $('tbodyImportacoes').innerHTML = lista.map(i => `
+        <tr><td>${i.id}</td><td style="white-space:nowrap">${(i.criado_em || '').slice(0, 16).replace('T', ' ')}</td>
+        <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(i.arquivo_nome || '')}</td>
+        <td>${esc(i.formato || '')}</td><td>${esc(i.banco_nome || '')}</td><td>${esc(i.conta_bancaria || '')}</td>
+        <td style="white-space:nowrap">${fmtData(i.periodo_inicio)} a ${fmtData(i.periodo_fim)}</td>
+        <td>${i.qtd_lancamentos}</td>
+        <td class="valor-pos">${fmtMoeda(i.total_entradas || 0)}</td>
+        <td class="valor-neg">${fmtMoeda(-(i.total_saidas || 0))}</td>
+        <td style="white-space:nowrap">
+            <a class="row-action" href="/api/importacoes/${i.id}/arquivo">baixar .txt</a>
+            <button class="row-action excluir" onclick="excluirImportacao(${i.id})">excluir</button>
+        </td></tr>`).join('');
+}
+async function excluirImportacao(id) {
+    if (!confirm('Excluir a importação #' + id + '? Suas transações deixarão de ser detectadas como duplicadas.')) return;
+    await api('/api/importacoes/' + id, { method: 'DELETE' });
+    carregarImportacoes();
+}
+
+// ---------- configurações ----------
+function preencherConfig() {
+    $('cfCnpj').value = config.cnpj || ''; $('cfFilial').value = config.filial || '';
+    $('cfContaPadrao').value = config.conta_padrao || ''; mostrarDescConta($('cfContaPadrao'));
+    $('cfHistEntrada').value = config.historico_entrada || ''; $('cfHistSaida').value = config.historico_saida || '';
+    $('cfComplemento').value = config.complemento_padrao || '{descricao}';
+}
+async function salvarConfig() {
+    try {
+        await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                cnpj: $('cfCnpj').value, filial: $('cfFilial').value,
+                conta_padrao: $('cfContaPadrao').value,
+                historico_entrada: $('cfHistEntrada').value, historico_saida: $('cfHistSaida').value,
+                complemento_padrao: $('cfComplemento').value }) });
+        config = await api('/api/config');
+        status('Configurações salvas.');
+    } catch (e) { status(e.message, true); }
+}
+
+carregarTudo().catch(e => status('Falha ao carregar dados: ' + e.message, true));
+</script>
+</body>
+</html>
