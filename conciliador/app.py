@@ -410,9 +410,14 @@ def processar_arquivo():
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 
+    texto_extraido = extrato.pop('texto_extraido', '')
     if not extrato['transacoes']:
-        return jsonify({'error': 'Nenhuma transação encontrada no arquivo. Se for um PDF '
-                                 'escaneado (imagem), use o OFX do banco.'}), 400
+        return jsonify({
+            'error': 'Nenhuma transação encontrada no arquivo. Se for um PDF escaneado '
+                     '(imagem), use o OFX do banco. O texto lido do PDF está abaixo — '
+                     'confira se as transações aparecem nele.',
+            'texto_extraido': texto_extraido,
+        }), 400
 
     conn = get_db()
     config = dict(conn.execute('SELECT * FROM config WHERE id = 1').fetchone())

@@ -104,6 +104,15 @@
                 </div>
             </div>
 
+            <div class="card" id="areaDiagnostico" style="display:none; border-color:#fca5a5;">
+                <label style="color:#991b1b">⚠ Não foi possível interpretar o extrato — diagnóstico</label>
+                <p class="dica" style="margin-bottom:10px">Este é o texto que o sistema conseguiu ler do PDF.
+                Se as transações aparecem abaixo mas não foram reconhecidas, copie este texto e envie para o suporte
+                ajustar o leitor deste layout. Se estiver vazio ou ilegível, o PDF é uma imagem escaneada — use o arquivo OFX do banco.</p>
+                <button class="btn-sec" onclick="copiarDiagnostico()" style="margin-bottom:10px">📋 Copiar texto</button>
+                <pre id="diagTexto" style="max-height:300px; overflow:auto; background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:12px; font-size:0.75rem; white-space:pre-wrap;"></pre>
+            </div>
+
             <div id="areaResultado" style="display:none">
                 <div class="resumo-extrato" id="resumoExtrato"></div>
                 <div class="card" style="overflow-x:auto">
@@ -267,7 +276,11 @@ async function api(url, opts) {
     let corpo = null;
     const tipo = r.headers.get('content-type') || '';
     if (tipo.includes('json')) corpo = await r.json();
-    if (!r.ok) throw new Error((corpo && corpo.error) || 'Erro na comunicação com o servidor');
+    if (!r.ok) {
+        const err = new Error((corpo && corpo.error) || 'Erro na comunicação com o servidor');
+        err.corpo = corpo;
+        throw err;
+    }
     return corpo;
 }
 const fmtMoeda = v => (v < 0 ? '-' : '') + 'R$ ' + Math.abs(v).toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
@@ -330,6 +343,7 @@ async function processarArquivo() {
     if ($('concContaBancaria').value) fd.append('conta_bancaria_id', $('concContaBancaria').value);
     $('btnProcessar').disabled = true;
     $('btnProcessar').textContent = '⏳ Processando...';
+    $('areaDiagnostico').style.display = 'none';
     try {
         conciliacao = await api('/api/processar', { method: 'POST', body: fd });
         conciliacao.transacoes.forEach(t => { t.ignorar = !!t.duplicada; });
@@ -337,7 +351,14 @@ async function processarArquivo() {
         renderConciliacao();
         $('btnReprocessar').style.display = 'inline-block';
         status('Extrato processado: ' + conciliacao.transacoes.length + ' transações.');
-    } catch (e) { status(e.message, true); }
+    } catch (e) {
+        status(e.message, true);
+        if (e.corpo && e.corpo.texto_extraido !== undefined) {
+            $('areaResultado').style.display = 'none';
+            $('diagTexto').textContent = e.corpo.texto_extraido || '(nenhum texto foi extraído do PDF)';
+            $('areaDiagnostico').style.display = 'block';
+        }
+    }
     $('btnProcessar').disabled = false;
     $('btnProcessar').textContent = '🔎 Processar Extrato';
 }
@@ -381,6 +402,12 @@ function atualizarTotais() {
     $('totSel').textContent = sel.length + ' / ' + conciliacao.transacoes.length;
     $('totEnt').textContent = fmtMoeda(sel.filter(t => t.tipo === 'entrada').reduce((s, t) => s + t.valor, 0));
     $('totSai').textContent = fmtMoeda(-sel.filter(t => t.tipo === 'saida').reduce((s, t) => s + Math.abs(t.valor), 0));
+}
+
+function copiarDiagnostico() {
+    navigator.clipboard.writeText($('diagTexto').textContent)
+        .then(() => status('Texto copiado para a área de transferência.'))
+        .catch(() => status('Não foi possível copiar automaticamente — selecione o texto e copie manualmente.', true));
 }
 
 function criarRegraDaTransacao(i) {

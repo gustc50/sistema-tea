@@ -72,8 +72,16 @@ O complemento aceita os modelos `{descricao}`, `{documento}`, `{data}` e
 - O PDF precisa conter **texto** (extrato baixado do internet banking/app).
   Extratos **escaneados (imagem)** não são lidos — nesse caso use o OFX.
 - Layouts de extrato variam entre versões dos aplicativos dos bancos. O
-  parser trata os padrões usuais (valor com sufixo D/C, valor com sinal,
-  datas agrupadas por dia como no Inter, linhas de saldo ignoradas), e a tela
-  de conferência permite corrigir qualquer linha antes de exportar.
+  parser trata os padrões usuais: valor com sufixo D/C (colado ou separado),
+  valor com sinal antes ou depois, com e sem separador de milhar, data
+  completa ou curta (dd/mm, com ano deduzido do período), datas agrupadas
+  por dia (Inter e extratos de app), histórico em várias linhas, texto com
+  letras espaçadas e linhas de saldo ignoradas. A tela de conferência
+  permite corrigir qualquer linha antes de exportar.
+- **Diagnóstico**: se nenhuma transação for reconhecida, a tela mostra o
+  texto que foi extraído do PDF. Se as transações aparecem nesse texto,
+  copie-o e envie para o suporte ajustar o leitor àquele layout; se o texto
+  estiver vazio, o PDF é imagem escaneada (use o OFX). PDFs protegidos por
+  senha também não são lidos — salve uma cópia sem senha.
 - Sempre que possível, **prefira o OFX**: é um formato estruturado, com
   identificador único por transação (controle de duplicidade mais preciso).
