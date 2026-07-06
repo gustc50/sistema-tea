@@ -135,7 +135,9 @@
                     </div>
                     <p class="dica">Linhas amarelas já foram exportadas antes (possível duplicidade) e vêm desmarcadas.
                     Entrada: débito na conta do banco e crédito na conta informada; saída: o inverso.
-                    Sem conta contábil preenchida, será usada a conta padrão das Configurações (se houver).</p>
+                    Sem conta contábil preenchida, será usada a conta padrão das Configurações (se houver).
+                    Ao preencher a conta de uma linha, o sistema oferece aplicá-la às demais transações com
+                    descrição semelhante (ignorando números e datas). Para tornar permanente, use "＋regra".</p>
                 </div>
             </div>
         </div>
@@ -388,7 +390,7 @@ function renderConciliacao() {
                 : (t.regra_nome ? `<span class="badge badge-padrao">${esc(t.regra_nome)}</span>`
                 : `<span class="badge ${t.tipo === 'entrada' ? 'badge-entrada' : 'badge-saida'}">${t.tipo === 'entrada' ? 'entrada' : 'saída'}</span>`)}</td>
             <td class="col-conta"><input list="dlPlano" value="${esc(t.conta_contabil)}" title="${esc(descConta(t.conta_contabil))}"
-                onchange="conciliacao.transacoes[${i}].conta_contabil=this.value.trim(); this.title=descConta(this.value)"></td>
+                onchange="contaAlterada(${i}, this)"></td>
             <td class="col-hist"><input value="${esc(t.codigo_historico)}" onchange="conciliacao.transacoes[${i}].codigo_historico=this.value.trim()"></td>
             <td><input value="${esc(t.complemento)}" onchange="conciliacao.transacoes[${i}].complemento=this.value"></td>
             <td><button class="row-action" title="Criar regra a partir desta transação" onclick="criarRegraDaTransacao(${i})">＋regra</button></td>
@@ -402,6 +404,36 @@ function atualizarTotais() {
     $('totSel').textContent = sel.length + ' / ' + conciliacao.transacoes.length;
     $('totEnt').textContent = fmtMoeda(sel.filter(t => t.tipo === 'entrada').reduce((s, t) => s + t.valor, 0));
     $('totSai').textContent = fmtMoeda(-sel.filter(t => t.tipo === 'saida').reduce((s, t) => s + Math.abs(t.valor), 0));
+}
+
+// Chave para agrupar transações "iguais": descrição sem acentos, números,
+// pontuação e espaços extras — assim "PIX SOCIO JOAO 03/06" = "PIX SOCIO JOAO 15/06"
+function chaveDescricao(t) {
+    return (t.descricao || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase().replace(/\d+/g, ' ').replace(/[^A-Z ]+/g, ' ')
+        .replace(/\s+/g, ' ').trim();
+}
+
+function contaAlterada(i, input) {
+    const t = conciliacao.transacoes[i];
+    const conta = input.value.trim();
+    t.conta_contabil = conta;
+    input.title = descConta(conta);
+    if (!conta) return;
+    const chave = chaveDescricao(t);
+    if (!chave) return;
+    const iguais = conciliacao.transacoes.filter((o, j) => j !== i
+        && chaveDescricao(o) === chave && o.conta_contabil !== conta);
+    if (!iguais.length) return;
+    const nomeConta = descConta(conta);
+    if (confirm(`Existem ${iguais.length} outra(s) transação(ões) com descrição semelhante a\n"${t.descricao}".\n\nAplicar a conta ${conta}${nomeConta ? ' — ' + nomeConta : ''} a todas?`)) {
+        iguais.forEach(o => {
+            o.conta_contabil = conta;
+            if (o.tipo === t.tipo && t.codigo_historico) o.codigo_historico = t.codigo_historico;
+        });
+        renderConciliacao();
+        status(`Conta ${conta} aplicada a ${iguais.length + 1} transações com descrição semelhante.`);
+    }
 }
 
 function copiarDiagnostico() {

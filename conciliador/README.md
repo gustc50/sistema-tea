@@ -43,6 +43,11 @@ Os dados ficam em `conciliador/conciliador.db` (SQLite, criado automaticamente).
    sugerida (tudo é editável linha a linha), desmarque o que não deve ser
    lançado e clique em **Gerar arquivo Domínio (.txt)**. Transações já
    exportadas antes aparecem em amarelo ("já importada") e vêm desmarcadas.
+   Ao preencher a conta contábil de uma linha, o sistema pergunta se aplica
+   a mesma conta às demais transações com **descrição semelhante** (a
+   comparação ignora números e datas — útil para retiradas/aportes de
+   sócios que se repetem no mês). Para tornar a classificação permanente
+   nos próximos extratos, use o botão **＋regra** da linha.
 
 No Domínio, importe o TXT em **Utilitários > Importação > Importação Padrão
 de Lançamentos**.
