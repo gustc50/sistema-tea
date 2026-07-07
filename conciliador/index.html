@@ -72,6 +72,9 @@
 <body>
     <aside>
         <h2>🏦 Conciliador Bancário</h2>
+        <label style="color:#94a3b8; font-size:.68rem; text-transform:uppercase; letter-spacing:.5px; margin-bottom:5px;">Empresa (cliente)</label>
+        <select id="empresaSelect" onchange="trocarEmpresa(this.value)"
+            style="margin-bottom:20px; background:#0f172a; color:white; border:1px solid #334155;"></select>
         <button onclick="switchTab('conciliar')" class="active" id="nav-conciliar">📥 Conciliar Extrato</button>
         <button onclick="switchTab('plano')" id="nav-plano">📚 Plano de Contas</button>
         <button onclick="switchTab('bancos')" id="nav-bancos">💳 Contas Bancárias</button>
@@ -246,10 +249,11 @@
 
         <!-- ============ CONFIGURAÇÕES ============ -->
         <div id="tab-config" class="tab-content">
-            <h1>Configurações</h1>
-            <p class="sub">Dados usados na geração do arquivo de importação do Domínio.</p>
+            <h1>Empresa e Configurações</h1>
+            <p class="sub">Dados da empresa selecionada, usados na geração do arquivo de importação do Domínio. Cada empresa tem plano de contas, contas bancárias, regras e memória próprios.</p>
             <div class="card">
                 <div class="form-grid">
+                    <div><label>Nome da Empresa *</label><input id="cfNome" placeholder="Ex.: Clínica ABC Ltda"></div>
                     <div><label>CNPJ da Empresa *</label><input id="cfCnpj" placeholder="00.000.000/0000-00"></div>
                     <div><label>Código da Filial (Domínio)</label><input id="cfFilial" placeholder="em branco = matriz"></div>
                     <div><label>Conta Padrão p/ Não Identificados</label><input id="cfContaPadrao" list="dlPlano" placeholder="ex.: conta transitória" onchange="mostrarDescConta(this)"><span class="desc-conta" id="cfContaDesc"></span></div>
@@ -263,6 +267,19 @@
                 No Domínio, importe em: Utilitários &gt; Importação &gt; Importação Padrão de Lançamentos.
                 Os códigos de histórico devem existir no cadastro de históricos da empresa no Domínio.</p>
             </div>
+
+            <div class="card">
+                <label>Empresas Cadastradas (clientes do escritório)</label>
+                <div class="form-grid" style="grid-template-columns: 1fr 260px auto; align-items:end; margin-top:10px;">
+                    <div><label>Nome da Nova Empresa</label><input id="novaEmpresaNome" placeholder="Ex.: Comercial XYZ Ltda"></div>
+                    <div><label>CNPJ</label><input id="novaEmpresaCnpj" placeholder="opcional, pode preencher depois"></div>
+                    <div><button class="btn-primary" onclick="addEmpresa()">＋ Adicionar Empresa</button></div>
+                </div>
+                <table><thead><tr><th>Empresa</th><th>CNPJ</th><th></th></tr></thead><tbody id="tbodyEmpresas"></tbody></table>
+                <p class="dica">Ao adicionar uma empresa, ela é selecionada automaticamente — cadastre então o plano de contas,
+                as contas bancárias e as regras dela. A troca de empresa é feita a qualquer momento no menu lateral.
+                Excluir uma empresa apaga todos os dados dela (plano, regras, importações).</p>
+            </div>
         </div>
 
         <datalist id="dlPlano"></datalist>
@@ -270,9 +287,11 @@
     <div class="status-bar" id="statusBar"></div>
 
 <script>
-let planoContas = [], contasBancarias = [], regras = [], bancosLista = [], config = {};
+let empresas = [], empresaId = null;
+let planoContas = [], contasBancarias = [], regras = [], bancosLista = [];
 let conciliacao = null;      // resultado do último processamento
 let arquivoAtual = null;     // File para reprocessar
+const qe = () => '?empresa=' + empresaId;   // parâmetro de empresa nas chamadas GET
 
 // ---------- utilidades ----------
 const $ = id => document.getElementById(id);
@@ -316,15 +335,93 @@ function mostrarDescConta(input) {
     if (span) span.textContent = descConta(input.value);
 }
 
-// ---------- carga inicial ----------
+// ---------- carga inicial / empresas ----------
 async function carregarTudo() {
-    [planoContas, contasBancarias, regras, bancosLista, config] = await Promise.all([
-        api('/api/plano-contas'), api('/api/contas-bancarias'), api('/api/regras'),
-        api('/api/bancos'), api('/api/config')
+    [empresas, bancosLista] = await Promise.all([api('/api/empresas'), api('/api/bancos')]);
+    $('cbBanco').innerHTML = bancosLista.map(b => `<option value="${b.codigo}">${b.codigo} - ${b.nome}</option>`).join('');
+    const salva = parseInt(localStorage.getItem('empresaId'));
+    empresaId = empresas.some(e => e.id === salva) ? salva : (empresas[0] ? empresas[0].id : null);
+    renderEmpresaSelect();
+    await carregarDadosEmpresa();
+}
+
+async function carregarDadosEmpresa() {
+    localStorage.setItem('empresaId', empresaId);
+    [planoContas, contasBancarias, regras] = await Promise.all([
+        api('/api/plano-contas' + qe()), api('/api/contas-bancarias' + qe()), api('/api/regras' + qe())
     ]);
     renderPlano(); renderBancos(); renderRegras(); renderDatalist();
-    renderSelectContas(); preencherConfig(); carregarImportacoes();
-    $('cbBanco').innerHTML = bancosLista.map(b => `<option value="${b.codigo}">${b.codigo} - ${b.nome}</option>`).join('');
+    renderSelectContas(); preencherConfig(); carregarImportacoes(); renderEmpresasLista();
+}
+
+function empresaAtual() {
+    return empresas.find(e => e.id === empresaId) || {};
+}
+
+function renderEmpresaSelect() {
+    $('empresaSelect').innerHTML = empresas.map(e =>
+        `<option value="${e.id}" ${e.id === empresaId ? 'selected' : ''}>${esc(e.nome)}</option>`).join('');
+}
+
+async function trocarEmpresa(novoId) {
+    empresaId = parseInt(novoId);
+    // Descarta a conciliação em andamento: ela pertence à empresa anterior
+    conciliacao = null;
+    arquivoAtual = null;
+    $('areaResultado').style.display = 'none';
+    $('areaDiagnostico').style.display = 'none';
+    $('btnReprocessar').style.display = 'none';
+    $('btnProcessar').disabled = true;
+    $('dropTexto').innerHTML = '📄 Clique ou arraste aqui o arquivo <b>.ofx</b> ou <b>.pdf</b> do extrato';
+    limparFormRegra();
+    await carregarDadosEmpresa();
+    status('Empresa ativa: ' + (empresaAtual().nome || ''));
+}
+
+function renderEmpresasLista() {
+    $('tbodyEmpresas').innerHTML = empresas.map(e => `
+        <tr style="${e.id === empresaId ? 'font-weight:600' : ''}">
+        <td>${esc(e.nome)} ${e.id === empresaId ? '<span class="badge badge-regra">ativa</span>' : ''}</td>
+        <td>${esc(e.cnpj || '—')}</td>
+        <td style="white-space:nowrap">
+            ${e.id !== empresaId ? `<button class="row-action" onclick="selecionarEmpresa(${e.id})">selecionar</button>` : ''}
+            <button class="row-action excluir" onclick="excluirEmpresa(${e.id})">excluir</button>
+        </td></tr>`).join('');
+}
+
+async function selecionarEmpresa(id) {
+    $('empresaSelect').value = id;
+    await trocarEmpresa(id);
+}
+
+async function addEmpresa() {
+    const nome = $('novaEmpresaNome').value.trim();
+    if (!nome) return status('Informe o nome da nova empresa.', true);
+    try {
+        const r = await api('/api/empresas', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nome, cnpj: $('novaEmpresaCnpj').value }) });
+        $('novaEmpresaNome').value = ''; $('novaEmpresaCnpj').value = '';
+        empresas = await api('/api/empresas');
+        empresaId = r.id;
+        renderEmpresaSelect();
+        await carregarDadosEmpresa();
+        switchTab('config');
+        status('Empresa "' + nome + '" criada e selecionada. Preencha o CNPJ e cadastre o plano de contas dela.');
+    } catch (e) { status(e.message, true); }
+}
+
+async function excluirEmpresa(id) {
+    const emp = empresas.find(e => e.id === id) || {};
+    if (!confirm('Excluir a empresa "' + (emp.nome || id) + '"?\n\nTODOS os dados dela serão apagados: ' +
+                 'plano de contas, contas bancárias, regras, memória e importações.')) return;
+    try {
+        await api('/api/empresas/' + id, { method: 'DELETE' });
+        empresas = await api('/api/empresas');
+        if (empresaId === id) empresaId = empresas[0].id;
+        renderEmpresaSelect();
+        await carregarDadosEmpresa();
+        status('Empresa excluída.');
+    } catch (e) { status(e.message, true); }
 }
 function renderDatalist() {
     $('dlPlano').innerHTML = planoContas.map(c =>
@@ -353,6 +450,7 @@ async function processarArquivo() {
     if (!arquivoAtual) return status('Selecione um arquivo primeiro.', true);
     const fd = new FormData();
     fd.append('arquivo', arquivoAtual);
+    fd.append('empresa', empresaId);
     if ($('concContaBancaria').value) fd.append('conta_bancaria_id', $('concContaBancaria').value);
     $('btnProcessar').disabled = true;
     $('btnProcessar').textContent = '⏳ Processando...';
@@ -506,6 +604,7 @@ async function exportarDominio() {
     const contaBancariaId = $('concContaBancaria').value || conciliacao.conta_bancaria_id;
     if (!contaBancariaId) return status('Selecione a conta bancária do extrato antes de exportar.', true);
     const payload = {
+        empresa: empresaId,
         conta_bancaria_id: parseInt(contaBancariaId),
         arquivo_nome: conciliacao.arquivo_nome, formato: conciliacao.formato,
         banco_codigo: conciliacao.banco_codigo, banco_nome: conciliacao.banco_nome,
@@ -540,24 +639,24 @@ async function importarPlano() {
     try {
         const r = await api('/api/plano-contas/importar', { method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ texto: $('planoTexto').value, substituir: $('planoSubstituir').checked }) });
+            body: JSON.stringify({ empresa: empresaId, texto: $('planoTexto').value, substituir: $('planoSubstituir').checked }) });
         status(`Plano importado: ${r.inseridas} inserida(s), ${r.atualizadas} atualizada(s).`);
         $('planoTexto').value = ''; $('planoSubstituir').checked = false;
-        planoContas = await api('/api/plano-contas'); renderPlano(); renderDatalist();
+        planoContas = await api('/api/plano-contas' + qe()); renderPlano(); renderDatalist();
     } catch (e) { status(e.message, true); }
 }
 async function addContaPlano() {
     try {
         await api('/api/plano-contas', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ codigo: $('pcCodigo').value, descricao: $('pcDescricao').value }) });
+            body: JSON.stringify({ empresa: empresaId, codigo: $('pcCodigo').value, descricao: $('pcDescricao').value }) });
         $('pcCodigo').value = ''; $('pcDescricao').value = '';
-        planoContas = await api('/api/plano-contas'); renderPlano(); renderDatalist();
+        planoContas = await api('/api/plano-contas' + qe()); renderPlano(); renderDatalist();
         status('Conta adicionada.');
     } catch (e) { status(e.message, true); }
 }
 async function excluirContaPlano(id) {
     await api('/api/plano-contas/' + id, { method: 'DELETE' });
-    planoContas = await api('/api/plano-contas'); renderPlano(); renderDatalist();
+    planoContas = await api('/api/plano-contas' + qe()); renderPlano(); renderDatalist();
 }
 
 // ---------- contas bancárias ----------
@@ -572,19 +671,20 @@ async function addContaBancaria() {
     try {
         await api('/api/contas-bancarias', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+                empresa: empresaId,
                 descricao: $('cbDescricao').value, banco_codigo: $('cbBanco').value,
                 agencia: $('cbAgencia').value, numero_conta: $('cbNumero').value,
                 conta_contabil: $('cbContaContabil').value }) });
         ['cbDescricao', 'cbAgencia', 'cbNumero', 'cbContaContabil'].forEach(id => $(id).value = '');
         $('cbContaDesc').textContent = '';
-        contasBancarias = await api('/api/contas-bancarias'); renderBancos(); renderSelectContas();
+        contasBancarias = await api('/api/contas-bancarias' + qe()); renderBancos(); renderSelectContas();
         status('Conta bancária cadastrada.');
     } catch (e) { status(e.message, true); }
 }
 async function excluirContaBancaria(id) {
     if (!confirm('Excluir esta conta bancária?')) return;
     await api('/api/contas-bancarias/' + id, { method: 'DELETE' });
-    contasBancarias = await api('/api/contas-bancarias'); renderBancos(); renderSelectContas();
+    contasBancarias = await api('/api/contas-bancarias' + qe()); renderBancos(); renderSelectContas();
 }
 
 // ---------- regras ----------
@@ -610,6 +710,7 @@ function renderRegras() {
 }
 function dadosFormRegra() {
     return {
+        empresa: empresaId,
         nome: $('rgNome').value, prioridade: $('rgPrioridade').value || 100,
         criterio_texto: $('rgCriterio').value, usar_regex: $('rgRegex').checked,
         tipo_movimento: $('rgTipo').value,
@@ -627,7 +728,7 @@ async function salvarRegra() {
         if (id) await api('/api/regras/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dadosFormRegra()) });
         else await api('/api/regras', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(dadosFormRegra()) });
         limparFormRegra();
-        regras = await api('/api/regras'); renderRegras();
+        regras = await api('/api/regras' + qe()); renderRegras();
         status('Regra salva. Reprocesse o extrato para aplicá-la.');
     } catch (e) { status(e.message, true); }
 }
@@ -652,17 +753,17 @@ async function alternarRegra(id) {
     const r = regras.find(x => x.id === id); if (!r) return;
     await api('/api/regras/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...r, usar_regex: !!r.usar_regex, ativo: r.ativo ? 0 : 1 }) });
-    regras = await api('/api/regras'); renderRegras();
+    regras = await api('/api/regras' + qe()); renderRegras();
 }
 async function excluirRegra(id) {
     if (!confirm('Excluir esta regra?')) return;
     await api('/api/regras/' + id, { method: 'DELETE' });
-    regras = await api('/api/regras'); renderRegras();
+    regras = await api('/api/regras' + qe()); renderRegras();
 }
 
 // ---------- importações ----------
 async function carregarImportacoes() {
-    const lista = await api('/api/importacoes');
+    const lista = await api('/api/importacoes' + qe());
     $('tbodyImportacoes').innerHTML = lista.map(i => `
         <tr><td>${i.id}</td><td style="white-space:nowrap">${(i.criado_em || '').slice(0, 16).replace('T', ' ')}</td>
         <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(i.arquivo_nome || '')}</td>
@@ -682,23 +783,27 @@ async function excluirImportacao(id) {
     carregarImportacoes();
 }
 
-// ---------- configurações ----------
+// ---------- configurações da empresa ----------
 function preencherConfig() {
-    $('cfCnpj').value = config.cnpj || ''; $('cfFilial').value = config.filial || '';
-    $('cfContaPadrao').value = config.conta_padrao || ''; mostrarDescConta($('cfContaPadrao'));
-    $('cfHistEntrada').value = config.historico_entrada || ''; $('cfHistSaida').value = config.historico_saida || '';
-    $('cfComplemento').value = config.complemento_padrao || '{descricao}';
+    const e = empresaAtual();
+    $('cfNome').value = e.nome || '';
+    $('cfCnpj').value = e.cnpj || ''; $('cfFilial').value = e.filial || '';
+    $('cfContaPadrao').value = e.conta_padrao || ''; mostrarDescConta($('cfContaPadrao'));
+    $('cfHistEntrada').value = e.historico_entrada || ''; $('cfHistSaida').value = e.historico_saida || '';
+    $('cfComplemento').value = e.complemento_padrao || '{descricao}';
 }
 async function salvarConfig() {
     try {
-        await api('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        await api('/api/empresas/' + empresaId, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+                nome: $('cfNome').value,
                 cnpj: $('cfCnpj').value, filial: $('cfFilial').value,
                 conta_padrao: $('cfContaPadrao').value,
                 historico_entrada: $('cfHistEntrada').value, historico_saida: $('cfHistSaida').value,
                 complemento_padrao: $('cfComplemento').value }) });
-        config = await api('/api/config');
-        status('Configurações salvas.');
+        empresas = await api('/api/empresas');
+        renderEmpresaSelect(); renderEmpresasLista();
+        status('Configurações da empresa salvas.');
     } catch (e) { status(e.message, true); }
 }
 

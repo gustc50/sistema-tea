@@ -21,12 +21,23 @@ python app.py
 Acesse **http://127.0.0.1:5001** (o Sistema TEA continua na porta 5000).
 Os dados ficam em `conciliador/conciliador.db` (SQLite, criado automaticamente).
 
+## Multiempresa (clientes do escritório)
+
+O conciliador é **multiempresa**: cada empresa cadastrada tem seu próprio
+plano de contas, contas bancárias, regras, memória de classificação,
+histórico de importações e configurações. A empresa ativa é escolhida no
+seletor do menu lateral, e novas empresas são cadastradas na aba
+**Configurações**. Bancos de dados criados na versão anterior (empresa
+única) são migrados automaticamente: os dados existentes viram a
+"Empresa 1", sem perda de nada.
+
 ## Passo a passo de uso
 
-1. **Configurações** — informe o CNPJ da empresa (obrigatório para gerar o
-   arquivo), o código da filial no Domínio (em branco = matriz), os códigos de
-   histórico padrão para entradas e saídas e, se quiser, uma **conta padrão**
-   para transações não identificadas (ex.: conta transitória).
+1. **Configurações** — dê nome à empresa e informe o CNPJ (obrigatório para
+   gerar o arquivo), o código da filial no Domínio (em branco = matriz), os
+   códigos de histórico padrão para entradas e saídas e, se quiser, uma
+   **conta padrão** para transações não identificadas (ex.: conta
+   transitória). Cadastre as demais empresas (clientes) na mesma aba.
 2. **Plano de Contas** — cole o plano da empresa (uma conta por linha, no
    formato `código;descrição` — aceita também TAB ou vírgula, direto do Excel).
    O código é o **código da conta usado nos lançamentos do Domínio**.

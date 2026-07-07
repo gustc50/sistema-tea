@@ -5,6 +5,11 @@ Brasil, Santander), classifica cada transação pelo plano de contas da empresa
 e pelas regras de situações especiais, e gera o arquivo TXT de lançamentos
 no layout de importação do Domínio.
 
+Multiempresa: cada empresa (cliente do escritório) tem seu próprio plano de
+contas, contas bancárias, regras, memória de classificação e configurações.
+A empresa ativa é selecionada na interface e enviada em cada chamada da API
+(parâmetro `empresa`).
+
 Roda em http://127.0.0.1:5001 (porta diferente do Sistema TEA, que usa 5000).
 """
 
@@ -25,6 +30,17 @@ app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'conciliador.db')
 
+PLANO_CONTAS_SCHEMA = '''
+    CREATE TABLE plano_contas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        empresa_id INTEGER NOT NULL DEFAULT 1 REFERENCES empresas(id),
+        codigo TEXT NOT NULL,
+        descricao TEXT NOT NULL,
+        criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (empresa_id, codigo)
+    );
+'''
+
 
 def get_db():
     conn = sqlite3.connect(DB_PATH)
@@ -33,27 +49,24 @@ def get_db():
 
 
 def init_db():
-    """Cria as tabelas automaticamente na primeira execução."""
+    """Cria as tabelas na primeira execução e migra bancos da versão de
+    empresa única (config global, tabelas sem empresa_id) para multiempresa."""
     conn = get_db()
     conn.executescript('''
-        CREATE TABLE IF NOT EXISTS config (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
+        CREATE TABLE IF NOT EXISTS empresas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
             cnpj TEXT,
             filial TEXT,
             conta_padrao TEXT,
             historico_entrada TEXT,
             historico_saida TEXT,
             complemento_padrao TEXT DEFAULT '{descricao}',
-            atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        CREATE TABLE IF NOT EXISTS plano_contas (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            codigo TEXT NOT NULL UNIQUE,
-            descricao TEXT NOT NULL,
             criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS contas_bancarias (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            empresa_id INTEGER NOT NULL DEFAULT 1 REFERENCES empresas(id),
             descricao TEXT NOT NULL,
             banco_codigo TEXT NOT NULL,
             agencia TEXT,
@@ -63,6 +76,7 @@ def init_db():
         );
         CREATE TABLE IF NOT EXISTS regras (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            empresa_id INTEGER NOT NULL DEFAULT 1 REFERENCES empresas(id),
             nome TEXT NOT NULL,
             prioridade INTEGER NOT NULL DEFAULT 100,
             criterio_texto TEXT,
@@ -79,6 +93,7 @@ def init_db():
         );
         CREATE TABLE IF NOT EXISTS importacoes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            empresa_id INTEGER NOT NULL DEFAULT 1 REFERENCES empresas(id),
             arquivo_nome TEXT,
             formato TEXT,
             banco_codigo TEXT,
@@ -108,9 +123,62 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_transacoes_hash ON transacoes(hash);
     ''')
-    conn.execute('INSERT OR IGNORE INTO config (id) VALUES (1)')
+
+    def colunas(tabela):
+        return [r['name'] for r in conn.execute('PRAGMA table_info(%s)' % tabela).fetchall()]
+
+    # plano_contas antigo tinha UNIQUE só no código; recria com a unicidade
+    # por (empresa, código), preservando os dados na empresa 1
+    cols_plano = colunas('plano_contas')
+    if not cols_plano:
+        conn.executescript(PLANO_CONTAS_SCHEMA)
+    elif 'empresa_id' not in cols_plano:
+        conn.execute('ALTER TABLE plano_contas RENAME TO plano_contas_old')
+        conn.executescript(PLANO_CONTAS_SCHEMA)
+        conn.execute('INSERT INTO plano_contas (id, empresa_id, codigo, descricao, criado_em) '
+                     'SELECT id, 1, codigo, descricao, criado_em FROM plano_contas_old')
+        conn.execute('DROP TABLE plano_contas_old')
+
+    # Tabelas criadas na versão de empresa única ganham a coluna empresa_id
+    for tabela in ('contas_bancarias', 'regras', 'importacoes'):
+        if 'empresa_id' not in colunas(tabela):
+            conn.execute('ALTER TABLE %s ADD COLUMN empresa_id INTEGER NOT NULL DEFAULT 1 '
+                         'REFERENCES empresas(id)' % tabela)
+
+    # A antiga configuração global (tabela config) vira a primeira empresa
+    if not conn.execute('SELECT 1 FROM empresas LIMIT 1').fetchone():
+        antiga = None
+        if colunas('config'):
+            antiga = conn.execute('SELECT * FROM config WHERE id = 1').fetchone()
+        if antiga:
+            conn.execute('''
+                INSERT INTO empresas (id, nome, cnpj, filial, conta_padrao,
+                    historico_entrada, historico_saida, complemento_padrao)
+                VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+            ''', ('Empresa 1', antiga['cnpj'], antiga['filial'], antiga['conta_padrao'],
+                  antiga['historico_entrada'], antiga['historico_saida'],
+                  antiga['complemento_padrao'] or '{descricao}'))
+        else:
+            conn.execute("INSERT INTO empresas (id, nome) VALUES (1, 'Empresa 1')")
+    conn.execute('DROP TABLE IF EXISTS config')
     conn.commit()
     conn.close()
+
+
+def _empresa_id(conn):
+    """Empresa ativa da requisição (parâmetro `empresa` na query string, no
+    form ou no JSON). Se ausente/inválida, usa a primeira cadastrada."""
+    valor = request.values.get('empresa')
+    if valor is None and request.is_json:
+        valor = (request.json or {}).get('empresa')
+    try:
+        eid = int(valor)
+        if conn.execute('SELECT 1 FROM empresas WHERE id = ?', (eid,)).fetchone():
+            return eid
+    except (TypeError, ValueError):
+        pass
+    row = conn.execute('SELECT id FROM empresas ORDER BY id LIMIT 1').fetchone()
+    return row['id'] if row else None
 
 
 def _hash_transacao(conta_bancaria_id, t):
@@ -131,33 +199,78 @@ def index():
     return send_file('index.html')
 
 
-# --- CONFIGURAÇÕES ---
+# --- EMPRESAS (CLIENTES) ---
 
-@app.route('/api/config', methods=['GET'])
-def get_config():
-    conn = get_db()
-    row = conn.execute('SELECT * FROM config WHERE id = 1').fetchone()
-    conn.close()
-    return jsonify(dict(row))
+CAMPOS_EMPRESA = ('nome', 'cnpj', 'filial', 'conta_padrao',
+                  'historico_entrada', 'historico_saida', 'complemento_padrao')
 
 
-@app.route('/api/config', methods=['POST'])
-def update_config():
-    data = request.json or {}
-    conn = get_db()
-    conn.execute('''
-        UPDATE config SET cnpj = ?, filial = ?, conta_padrao = ?,
-            historico_entrada = ?, historico_saida = ?, complemento_padrao = ?,
-            atualizado_em = CURRENT_TIMESTAMP
-        WHERE id = 1
-    ''', (
+def _valores_empresa(data):
+    nome = (data.get('nome') or '').strip()
+    if not nome:
+        raise ValueError('Informe o nome da empresa.')
+    return (
+        nome,
         (data.get('cnpj') or '').strip(),
         (data.get('filial') or '').strip(),
         (data.get('conta_padrao') or '').strip(),
         (data.get('historico_entrada') or '').strip(),
         (data.get('historico_saida') or '').strip(),
         (data.get('complemento_padrao') or '{descricao}').strip(),
-    ))
+    )
+
+
+@app.route('/api/empresas', methods=['GET'])
+def get_empresas():
+    conn = get_db()
+    rows = conn.execute('SELECT * FROM empresas ORDER BY nome').fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route('/api/empresas', methods=['POST'])
+def add_empresa():
+    try:
+        valores = _valores_empresa(request.json or {})
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    conn = get_db()
+    cursor = conn.execute('INSERT INTO empresas (%s) VALUES (%s)' % (
+        ', '.join(CAMPOS_EMPRESA), ', '.join('?' * len(CAMPOS_EMPRESA))), valores)
+    conn.commit()
+    novo_id = cursor.lastrowid
+    conn.close()
+    return jsonify({'status': 'ok', 'id': novo_id}), 201
+
+
+@app.route('/api/empresas/<int:eid>', methods=['PUT'])
+def update_empresa(eid):
+    try:
+        valores = _valores_empresa(request.json or {})
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+    conn = get_db()
+    conn.execute('UPDATE empresas SET %s WHERE id = ?' % (
+        ', '.join('%s = ?' % c for c in CAMPOS_EMPRESA)), valores + (eid,))
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'ok'})
+
+
+@app.route('/api/empresas/<int:eid>', methods=['DELETE'])
+def delete_empresa(eid):
+    """Exclui a empresa e TODOS os seus dados (plano, contas, regras,
+    importações). A última empresa não pode ser excluída."""
+    conn = get_db()
+    total = conn.execute('SELECT COUNT(*) AS n FROM empresas').fetchone()['n']
+    if total <= 1:
+        conn.close()
+        return jsonify({'error': 'Não é possível excluir a única empresa cadastrada.'}), 400
+    conn.execute('DELETE FROM transacoes WHERE importacao_id IN '
+                 '(SELECT id FROM importacoes WHERE empresa_id = ?)', (eid,))
+    for tabela in ('importacoes', 'regras', 'contas_bancarias', 'plano_contas'):
+        conn.execute('DELETE FROM %s WHERE empresa_id = ?' % tabela, (eid,))
+    conn.execute('DELETE FROM empresas WHERE id = ?', (eid,))
     conn.commit()
     conn.close()
     return jsonify({'status': 'ok'})
@@ -168,7 +281,9 @@ def update_config():
 @app.route('/api/plano-contas', methods=['GET'])
 def get_plano_contas():
     conn = get_db()
-    rows = conn.execute('SELECT * FROM plano_contas ORDER BY LENGTH(codigo), codigo').fetchall()
+    eid = _empresa_id(conn)
+    rows = conn.execute('SELECT * FROM plano_contas WHERE empresa_id = ? '
+                        'ORDER BY LENGTH(codigo), codigo', (eid,)).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -181,12 +296,14 @@ def add_conta_plano():
     if not codigo or not descricao:
         return jsonify({'error': 'Informe código e descrição da conta.'}), 400
     conn = get_db()
+    eid = _empresa_id(conn)
     try:
-        conn.execute('INSERT INTO plano_contas (codigo, descricao) VALUES (?, ?)', (codigo, descricao))
+        conn.execute('INSERT INTO plano_contas (empresa_id, codigo, descricao) VALUES (?, ?, ?)',
+                     (eid, codigo, descricao))
         conn.commit()
     except sqlite3.IntegrityError:
         conn.close()
-        return jsonify({'error': 'Já existe uma conta com o código %s.' % codigo}), 409
+        return jsonify({'error': 'Já existe uma conta com o código %s nesta empresa.' % codigo}), 409
     conn.close()
     return jsonify({'status': 'ok'}), 201
 
@@ -217,15 +334,18 @@ def importar_plano_contas():
         return jsonify({'error': 'Nenhuma conta reconhecida. Use uma conta por linha, '
                                  'no formato: código;descrição'}), 400
     conn = get_db()
+    eid = _empresa_id(conn)
     if substituir:
-        conn.execute('DELETE FROM plano_contas')
+        conn.execute('DELETE FROM plano_contas WHERE empresa_id = ?', (eid,))
     inseridas = atualizadas = 0
     for codigo, descricao in contas:
-        cur = conn.execute('UPDATE plano_contas SET descricao = ? WHERE codigo = ?', (descricao, codigo))
+        cur = conn.execute('UPDATE plano_contas SET descricao = ? WHERE empresa_id = ? AND codigo = ?',
+                           (descricao, eid, codigo))
         if cur.rowcount:
             atualizadas += 1
         else:
-            conn.execute('INSERT INTO plano_contas (codigo, descricao) VALUES (?, ?)', (codigo, descricao))
+            conn.execute('INSERT INTO plano_contas (empresa_id, codigo, descricao) VALUES (?, ?, ?)',
+                         (eid, codigo, descricao))
             inseridas += 1
     conn.commit()
     conn.close()
@@ -246,7 +366,9 @@ def delete_conta_plano(conta_id):
 @app.route('/api/contas-bancarias', methods=['GET'])
 def get_contas_bancarias():
     conn = get_db()
-    rows = conn.execute('SELECT * FROM contas_bancarias ORDER BY descricao').fetchall()
+    eid = _empresa_id(conn)
+    rows = conn.execute('SELECT * FROM contas_bancarias WHERE empresa_id = ? ORDER BY descricao',
+                        (eid,)).fetchall()
     conn.close()
     contas = []
     for r in rows:
@@ -265,10 +387,12 @@ def add_conta_bancaria():
     if not descricao or not banco_codigo or not conta_contabil:
         return jsonify({'error': 'Informe descrição, banco e conta contábil.'}), 400
     conn = get_db()
+    eid = _empresa_id(conn)
     conn.execute('''
-        INSERT INTO contas_bancarias (descricao, banco_codigo, agencia, numero_conta, conta_contabil)
-        VALUES (?, ?, ?, ?, ?)
-    ''', (descricao, banco_codigo, (data.get('agencia') or '').strip(),
+        INSERT INTO contas_bancarias (empresa_id, descricao, banco_codigo, agencia,
+            numero_conta, conta_contabil)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', (eid, descricao, banco_codigo, (data.get('agencia') or '').strip(),
           (data.get('numero_conta') or '').strip(), conta_contabil))
     conn.commit()
     conn.close()
@@ -321,7 +445,9 @@ def _valores_regra(data):
 @app.route('/api/regras', methods=['GET'])
 def get_regras():
     conn = get_db()
-    rows = conn.execute('SELECT * FROM regras ORDER BY prioridade, id').fetchall()
+    eid = _empresa_id(conn)
+    rows = conn.execute('SELECT * FROM regras WHERE empresa_id = ? ORDER BY prioridade, id',
+                        (eid,)).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
@@ -333,8 +459,9 @@ def add_regra():
     except (ValueError, TypeError) as e:
         return jsonify({'error': str(e)}), 400
     conn = get_db()
-    conn.execute('INSERT INTO regras (%s) VALUES (%s)' % (
-        ', '.join(CAMPOS_REGRA), ', '.join('?' * len(CAMPOS_REGRA))), valores)
+    eid = _empresa_id(conn)
+    conn.execute('INSERT INTO regras (empresa_id, %s) VALUES (?, %s)' % (
+        ', '.join(CAMPOS_REGRA), ', '.join('?' * len(CAMPOS_REGRA))), (eid,) + valores)
     conn.commit()
     conn.close()
     return jsonify({'status': 'ok'}), 201
@@ -365,9 +492,10 @@ def delete_regra(regra_id):
 
 # --- PROCESSAMENTO DO EXTRATO ---
 
-def _detectar_conta_bancaria(conn, extrato):
-    """Casa banco/conta do extrato com o cadastro de contas bancárias."""
-    contas = [dict(r) for r in conn.execute('SELECT * FROM contas_bancarias').fetchall()]
+def _detectar_conta_bancaria(conn, eid, extrato):
+    """Casa banco/conta do extrato com o cadastro de contas da empresa."""
+    contas = [dict(r) for r in conn.execute(
+        'SELECT * FROM contas_bancarias WHERE empresa_id = ?', (eid,)).fetchall()]
     candidatas = contas
     if extrato.get('banco_codigo'):
         por_banco = [c for c in contas if c['banco_codigo'] == extrato['banco_codigo']]
@@ -420,17 +548,20 @@ def processar_arquivo():
         }), 400
 
     conn = get_db()
-    config = dict(conn.execute('SELECT * FROM config WHERE id = 1').fetchone())
+    eid = _empresa_id(conn)
+    empresa = dict(conn.execute('SELECT * FROM empresas WHERE id = ?', (eid,)).fetchone())
 
     conta_bancaria = None
     cb_id = request.form.get('conta_bancaria_id')
     if cb_id:
-        row = conn.execute('SELECT * FROM contas_bancarias WHERE id = ?', (cb_id,)).fetchone()
+        row = conn.execute('SELECT * FROM contas_bancarias WHERE id = ? AND empresa_id = ?',
+                           (cb_id, eid)).fetchone()
         conta_bancaria = dict(row) if row else None
     if not conta_bancaria:
-        conta_bancaria = _detectar_conta_bancaria(conn, extrato)
+        conta_bancaria = _detectar_conta_bancaria(conn, eid, extrato)
 
-    regras = [dict(r) for r in conn.execute('SELECT * FROM regras WHERE ativo = 1').fetchall()]
+    regras = [dict(r) for r in conn.execute(
+        'SELECT * FROM regras WHERE empresa_id = ? AND ativo = 1', (eid,)).fetchall()]
     transacoes = extrato['transacoes']
     aplicar_regras(regras, transacoes, conta_bancaria['id'] if conta_bancaria else None)
 
@@ -440,12 +571,14 @@ def processar_arquivo():
                             'WHERE i.conta_bancaria_id = ?', (conta_bancaria['id'],)).fetchall()
         hashes_existentes = {r['hash'] for r in rows}
 
-    # Memória de classificação: descrições já exportadas antes sugerem a
-    # mesma conta/histórico. Regras têm prioridade; a mais recente vence.
+    # Memória de classificação da empresa: descrições já exportadas antes
+    # sugerem a mesma conta/histórico. Regras têm prioridade; a mais recente vence.
     memoria = {}
-    for r in conn.execute("SELECT descricao, conta_contabil, codigo_historico FROM transacoes "
-                          "WHERE conta_contabil IS NOT NULL AND conta_contabil != '' "
-                          "ORDER BY id").fetchall():
+    for r in conn.execute(
+            "SELECT t.descricao, t.conta_contabil, t.codigo_historico FROM transacoes t "
+            "JOIN importacoes i ON i.id = t.importacao_id "
+            "WHERE i.empresa_id = ? AND t.conta_contabil IS NOT NULL AND t.conta_contabil != '' "
+            "ORDER BY t.id", (eid,)).fetchall():
         k = chave_descricao(r['descricao'] or '')
         if k:
             memoria[k] = (r['conta_contabil'], r['codigo_historico'] or '')
@@ -459,19 +592,20 @@ def processar_arquivo():
                 t['codigo_historico'] = t['codigo_historico'] or hist_memoria
                 t['origem'] = 'memoria'
                 t['regra_nome'] = 'Memória (classificação anterior)'
-        if not t['conta_contabil'] and config.get('conta_padrao'):
-            t['conta_contabil'] = config['conta_padrao']
+        if not t['conta_contabil'] and empresa.get('conta_padrao'):
+            t['conta_contabil'] = empresa['conta_padrao']
             t['regra_nome'] = t['regra_nome'] or 'Conta padrão (não identificado)'
         if not t['codigo_historico']:
-            t['codigo_historico'] = (config.get('historico_entrada') if t['tipo'] == 'entrada'
-                                     else config.get('historico_saida')) or ''
-        modelo = t.pop('complemento_modelo', '') or config.get('complemento_padrao') or '{descricao}'
+            t['codigo_historico'] = (empresa.get('historico_entrada') if t['tipo'] == 'entrada'
+                                     else empresa.get('historico_saida')) or ''
+        modelo = t.pop('complemento_modelo', '') or empresa.get('complemento_padrao') or '{descricao}'
         t['complemento'] = montar_complemento(modelo, t)
         t['hash'] = _hash_transacao(conta_bancaria['id'] if conta_bancaria else None, t)
         t['duplicada'] = t['hash'] in hashes_existentes
     conn.close()
 
     return jsonify({
+        'empresa_id': eid,
         'arquivo_nome': nome,
         'formato': formato,
         'banco_codigo': extrato['banco_codigo'],
@@ -497,11 +631,14 @@ def exportar_dominio():
         return jsonify({'error': 'Selecione a conta bancária do extrato antes de exportar.'}), 400
 
     conn = get_db()
-    config = dict(conn.execute('SELECT * FROM config WHERE id = 1').fetchone())
-    cb = conn.execute('SELECT * FROM contas_bancarias WHERE id = ?', (conta_bancaria_id,)).fetchone()
+    eid = _empresa_id(conn)
+    empresa = dict(conn.execute('SELECT * FROM empresas WHERE id = ?', (eid,)).fetchone())
+    cb = conn.execute('SELECT * FROM contas_bancarias WHERE id = ? AND empresa_id = ?',
+                      (conta_bancaria_id, eid)).fetchone()
     if not cb:
         conn.close()
-        return jsonify({'error': 'Conta bancária não encontrada.'}), 400
+        return jsonify({'error': 'Conta bancária não encontrada nesta empresa. '
+                                 'Confira a empresa selecionada.'}), 400
     conta_banco = cb['conta_contabil']
 
     selecionadas = [t for t in transacoes if not t.get('ignorar')]
@@ -535,7 +672,7 @@ def exportar_dominio():
         })
 
     try:
-        conteudo = gerar_txt_dominio(config.get('cnpj'), lancamentos, config.get('filial') or '')
+        conteudo = gerar_txt_dominio(empresa.get('cnpj'), lancamentos, empresa.get('filial') or '')
     except ValueError as e:
         conn.close()
         return jsonify({'error': str(e)}), 400
@@ -543,11 +680,11 @@ def exportar_dominio():
     total_entradas = sum(t['valor'] for t in selecionadas if t['tipo'] == 'entrada')
     total_saidas = sum(abs(t['valor']) for t in selecionadas if t['tipo'] == 'saida')
     cursor = conn.execute('''
-        INSERT INTO importacoes (arquivo_nome, formato, banco_codigo, banco_nome,
+        INSERT INTO importacoes (empresa_id, arquivo_nome, formato, banco_codigo, banco_nome,
             conta_bancaria_id, periodo_inicio, periodo_fim, qtd_lancamentos,
             total_entradas, total_saidas, conteudo_txt)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (data.get('arquivo_nome'), data.get('formato'), data.get('banco_codigo'),
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (eid, data.get('arquivo_nome'), data.get('formato'), data.get('banco_codigo'),
           data.get('banco_nome'), conta_bancaria_id, data.get('periodo_inicio'),
           data.get('periodo_fim'), len(lancamentos), round(total_entradas, 2),
           round(total_saidas, 2), conteudo))
@@ -564,7 +701,8 @@ def exportar_dominio():
     conn.commit()
     conn.close()
 
-    nome_txt = 'dominio_%s_%s.txt' % (so_digitos(config.get('cnpj'))[:8] or 'lancamentos',
+    nome_txt = 'dominio_%s_%s.txt' % (so_digitos(empresa.get('cnpj'))[:8]
+                                      or re.sub(r'\W+', '_', empresa.get('nome') or 'lancamentos')[:20],
                                       datetime.now().strftime('%Y%m%d_%H%M%S'))
     return Response(conteudo, mimetype='text/plain; charset=windows-1252', headers={
         'Content-Disposition': 'attachment; filename="%s"' % nome_txt,
@@ -577,14 +715,16 @@ def exportar_dominio():
 @app.route('/api/importacoes', methods=['GET'])
 def get_importacoes():
     conn = get_db()
+    eid = _empresa_id(conn)
     rows = conn.execute('''
         SELECT i.id, i.arquivo_nome, i.formato, i.banco_nome, i.periodo_inicio,
                i.periodo_fim, i.qtd_lancamentos, i.total_entradas, i.total_saidas,
                i.criado_em, cb.descricao AS conta_bancaria
         FROM importacoes i
         LEFT JOIN contas_bancarias cb ON cb.id = i.conta_bancaria_id
+        WHERE i.empresa_id = ?
         ORDER BY i.id DESC
-    ''').fetchall()
+    ''', (eid,)).fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
 
