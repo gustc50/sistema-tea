@@ -44,6 +44,9 @@
         .badge-regra { background: #e0f2fe; color: #075985; }
         .badge-dup { background: #fef08a; color: #854d0e; }
         .badge-padrao { background: #f3e8ff; color: #6b21a8; }
+        .badge-memoria { background: #ecfccb; color: #3f6212; }
+        .btn-filtro { padding: 6px 14px; font-size: 0.78rem; }
+        .btn-filtro.active { background: var(--primary); color: white; }
         .valor-pos { color: #15803d; font-weight: 600; white-space: nowrap; }
         .valor-neg { color: #b91c1c; font-weight: 600; white-space: nowrap; }
         .status-bar { position: fixed; bottom: 0; right: 0; background: #166534; color: white; padding: 10px 22px; border-radius: 8px 0 0 0; font-size: 0.85rem; display: none; z-index: 999; max-width: 60%; }
@@ -116,9 +119,16 @@
             <div id="areaResultado" style="display:none">
                 <div class="resumo-extrato" id="resumoExtrato"></div>
                 <div class="card" style="overflow-x:auto">
+                    <div id="filtrosTabela" style="display:flex; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
+                        <button class="btn-sec btn-filtro active" onclick="setFiltro('todas', this)">Todas</button>
+                        <button class="btn-sec btn-filtro" onclick="setFiltro('semconta', this)">Sem conta</button>
+                        <button class="btn-sec btn-filtro" onclick="setFiltro('entradas', this)">Entradas</button>
+                        <button class="btn-sec btn-filtro" onclick="setFiltro('saidas', this)">Saídas</button>
+                        <button class="btn-sec btn-filtro" onclick="setFiltro('duplicadas', this)">Já importadas</button>
+                    </div>
                     <table>
                         <thead><tr>
-                            <th title="Marcadas serão lançadas">✔</th><th>Data</th><th>Descrição</th><th>Doc.</th>
+                            <th title="Marcar/desmarcar todas as linhas visíveis no filtro atual"><input type="checkbox" id="chkTodas" checked onchange="marcarTodas(this.checked)"></th><th>Data</th><th>Descrição</th><th>Doc.</th>
                             <th style="text-align:right">Valor</th><th>Classificação</th>
                             <th class="col-conta">Conta Contábil</th><th class="col-hist">Hist.</th>
                             <th>Complemento</th><th></th>
@@ -129,6 +139,7 @@
                         <div><b style="font-size:.72rem;color:#64748b;text-transform:uppercase">Selecionadas</b><div class="num" id="totSel">0</div></div>
                         <div><b style="font-size:.72rem;color:#64748b;text-transform:uppercase">Entradas</b><div class="num valor-pos" id="totEnt">R$ 0,00</div></div>
                         <div><b style="font-size:.72rem;color:#64748b;text-transform:uppercase">Saídas</b><div class="num valor-neg" id="totSai">R$ 0,00</div></div>
+                        <div title="Transações marcadas para lançar que ainda estão sem conta contábil"><b style="font-size:.72rem;color:#64748b;text-transform:uppercase">Sem conta</b><div class="num" id="totSemConta">0</div></div>
                         <div style="margin-left:auto; display:flex; gap:10px;">
                             <button class="btn-primary" onclick="exportarDominio()">📤 Gerar arquivo Domínio (.txt)</button>
                         </div>
@@ -350,6 +361,7 @@ async function processarArquivo() {
         conciliacao = await api('/api/processar', { method: 'POST', body: fd });
         conciliacao.transacoes.forEach(t => { t.ignorar = !!t.duplicada; });
         if (conciliacao.conta_bancaria_id) $('concContaBancaria').value = conciliacao.conta_bancaria_id;
+        resetFiltro();
         renderConciliacao();
         $('btnReprocessar').style.display = 'inline-block';
         status('Extrato processado: ' + conciliacao.transacoes.length + ' transações.');
@@ -379,7 +391,7 @@ function renderConciliacao() {
         ${!c.conta_bancaria_id ? '<div><b>⚠ Conta bancária</b>não identificada — selecione acima</div>' : ''}`;
     const tb = $('tbodyTransacoes');
     tb.innerHTML = c.transacoes.map((t, i) => `
-        <tr class="${t.duplicada ? 'dup ' : ''}${t.ignorar ? 'ignorada' : ''}" id="linha${i}">
+        <tr class="${t.duplicada ? 'dup ' : ''}${t.ignorar ? 'ignorada' : ''}" id="linha${i}" ${filtroMatch(t) ? '' : 'style="display:none"'}>
             <td><input type="checkbox" ${t.ignorar ? '' : 'checked'} onchange="conciliacao.transacoes[${i}].ignorar=!this.checked; document.getElementById('linha${i}').classList.toggle('ignorada', !this.checked); atualizarTotais()"></td>
             <td style="white-space:nowrap">${fmtData(t.data)}</td>
             <td title="${esc(t.descricao)}" style="max-width:260px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${esc(t.descricao)}
@@ -387,6 +399,7 @@ function renderConciliacao() {
             <td>${esc(t.documento)}</td>
             <td style="text-align:right" class="${t.valor >= 0 ? 'valor-pos' : 'valor-neg'}">${fmtMoeda(t.valor)}</td>
             <td>${t.regra_id ? `<span class="badge badge-regra" title="Regra aplicada">⚡ ${esc(t.regra_nome)}</span>`
+                : t.origem === 'memoria' ? `<span class="badge badge-memoria" title="Conta usada para esta descrição em importações anteriores">🧠 memória</span>`
                 : (t.regra_nome ? `<span class="badge badge-padrao">${esc(t.regra_nome)}</span>`
                 : `<span class="badge ${t.tipo === 'entrada' ? 'badge-entrada' : 'badge-saida'}">${t.tipo === 'entrada' ? 'entrada' : 'saída'}</span>`)}</td>
             <td class="col-conta"><input list="dlPlano" value="${esc(t.conta_contabil)}" title="${esc(descConta(t.conta_contabil))}"
@@ -404,6 +417,37 @@ function atualizarTotais() {
     $('totSel').textContent = sel.length + ' / ' + conciliacao.transacoes.length;
     $('totEnt').textContent = fmtMoeda(sel.filter(t => t.tipo === 'entrada').reduce((s, t) => s + t.valor, 0));
     $('totSai').textContent = fmtMoeda(-sel.filter(t => t.tipo === 'saida').reduce((s, t) => s + Math.abs(t.valor), 0));
+    const semConta = sel.filter(t => !(t.conta_contabil || '').trim()).length;
+    const el = $('totSemConta');
+    el.textContent = semConta ? semConta : '0 ✓';
+    el.style.color = semConta ? '#b91c1c' : '#15803d';
+}
+
+let filtroTabela = 'todas';
+function filtroMatch(t) {
+    switch (filtroTabela) {
+        case 'semconta': return !(t.conta_contabil || '').trim();
+        case 'entradas': return t.tipo === 'entrada';
+        case 'saidas': return t.tipo === 'saida';
+        case 'duplicadas': return !!t.duplicada;
+        default: return true;
+    }
+}
+function setFiltro(filtro, btn) {
+    filtroTabela = filtro;
+    document.querySelectorAll('#filtrosTabela button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderConciliacao();
+}
+function resetFiltro() {
+    filtroTabela = 'todas';
+    document.querySelectorAll('#filtrosTabela button').forEach((b, i) => b.classList.toggle('active', i === 0));
+    $('chkTodas').checked = true;
+}
+function marcarTodas(marcado) {
+    if (!conciliacao) return;
+    conciliacao.transacoes.forEach(t => { if (filtroMatch(t)) t.ignorar = !marcado; });
+    renderConciliacao();
 }
 
 // Chave para agrupar transações "iguais": descrição sem acentos, números,
@@ -419,6 +463,7 @@ function contaAlterada(i, input) {
     const conta = input.value.trim();
     t.conta_contabil = conta;
     input.title = descConta(conta);
+    atualizarTotais();
     if (!conta) return;
     const chave = chaveDescricao(t);
     if (!chave) return;

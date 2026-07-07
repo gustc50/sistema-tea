@@ -49,6 +49,16 @@ Os dados ficam em `conciliador/conciliador.db` (SQLite, criado automaticamente).
    sócios que se repetem no mês). Para tornar a classificação permanente
    nos próximos extratos, use o botão **＋regra** da linha.
 
+   A classificação segue esta ordem de prioridade em cada transação:
+   **1) regras especiais → 2) memória → 3) conta padrão**. A *memória*
+   sugere a conta e o histórico usados para a mesma descrição em
+   exportações anteriores (etiqueta "🧠 memória") — ou seja, o que você
+   classificar manualmente uma vez volta preenchido nos meses seguintes,
+   mesmo sem regra. Os filtros acima da tabela (Todas / Sem conta /
+   Entradas / Saídas / Já importadas), o marcar/desmarcar todas no
+   cabeçalho e o contador "Sem conta" no rodapé ajudam a conferir
+   extratos grandes rapidamente.
+
 No Domínio, importe o TXT em **Utilitários > Importação > Importação Padrão
 de Lançamentos**.
 

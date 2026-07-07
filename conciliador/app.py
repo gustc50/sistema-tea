@@ -19,7 +19,7 @@ from flask import Flask, request, jsonify, send_file, Response
 from ofx_parser import parse_ofx, BANCOS
 from pdf_parser import parse_extrato_pdf
 from dominio import gerar_txt_dominio, montar_complemento, so_digitos
-from regras import aplicar_regras, normalizar
+from regras import aplicar_regras, normalizar, chave_descricao
 
 app = Flask(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -440,7 +440,25 @@ def processar_arquivo():
                             'WHERE i.conta_bancaria_id = ?', (conta_bancaria['id'],)).fetchall()
         hashes_existentes = {r['hash'] for r in rows}
 
+    # Memória de classificação: descrições já exportadas antes sugerem a
+    # mesma conta/histórico. Regras têm prioridade; a mais recente vence.
+    memoria = {}
+    for r in conn.execute("SELECT descricao, conta_contabil, codigo_historico FROM transacoes "
+                          "WHERE conta_contabil IS NOT NULL AND conta_contabil != '' "
+                          "ORDER BY id").fetchall():
+        k = chave_descricao(r['descricao'] or '')
+        if k:
+            memoria[k] = (r['conta_contabil'], r['codigo_historico'] or '')
+
     for t in transacoes:
+        t['origem'] = 'regra' if t['regra_id'] else ''
+        if not t['conta_contabil']:
+            k = chave_descricao(t.get('descricao') or '')
+            if k in memoria:
+                t['conta_contabil'], hist_memoria = memoria[k]
+                t['codigo_historico'] = t['codigo_historico'] or hist_memoria
+                t['origem'] = 'memoria'
+                t['regra_nome'] = 'Memória (classificação anterior)'
         if not t['conta_contabil'] and config.get('conta_padrao'):
             t['conta_contabil'] = config['conta_padrao']
             t['regra_nome'] = t['regra_nome'] or 'Conta padrão (não identificado)'

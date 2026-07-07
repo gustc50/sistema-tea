@@ -19,6 +19,15 @@ def normalizar(texto):
     return re.sub(r'\s+', ' ', texto).upper().strip()
 
 
+def chave_descricao(texto):
+    """Chave para agrupar transações "iguais": descrição sem acentos, números
+    e pontuação — "PIX SOCIO JOAO 03/06" e "PIX SOCIO JOAO 17/06" têm a mesma
+    chave. Usada pela memória de classificação e pela cópia em massa da tela."""
+    s = re.sub(r'\d+', ' ', normalizar(texto))
+    s = re.sub(r'[^A-Z ]+', ' ', s)
+    return re.sub(r'\s+', ' ', s).strip()
+
+
 def regra_casa(regra, transacao, conta_bancaria_id=None):
     """True se a transação atende a todos os critérios preenchidos da regra."""
     if not regra.get('ativo', 1):
