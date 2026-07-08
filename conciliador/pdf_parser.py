@@ -51,10 +51,14 @@ LINHAS_TOTAIS = [
 # ser descartadas.
 LINHAS_RODAPE = [
     'EXTRATO DE CONTA', 'EXTRATO CONTA', 'PERIODO DO EXTRATO', 'OUVIDORIA',
-    'SAC ', 'CENTRAL DE ATENDIMENTO', 'PAGINA ', 'PAG.', 'FOLHA ', 'LIMITE ',
-    'CHEQUE ESPECIAL', 'APLICACOES AUTOMATICAS', 'ENCERRAMENTO',
-    'LANCAMENTOS FUTUROS',
+    'SAC ', 'SAC:', 'CENTRAL DE ATENDIMENTO', 'PAGINA ', 'PAG.', 'FOLHA ',
+    'LIMITE ', 'CHEQUE ESPECIAL', 'APLICACOES AUTOMATICAS', 'ENCERRAMENTO',
+    'LANCAMENTOS FUTUROS', 'HTTP://', 'HTTPS://', 'WWW.', 'INTERNET BANKING',
+    'ENCARGOS A VENCER', 'PREVISAO ', 'CUSTO EFETIVO', 'HISTORICO DE MOVIMENTACAO',
 ]
+# Linhas de saldo informativas que NÃO representam o saldo contábil da conta
+# (não entram na conferência): bloqueios e saldo disponível (inclui limite)
+SALDOS_INFORMATIVOS = ['BLOQUEADO', 'LIBERAR', 'DISPONIVEL']
 
 DETECCAO_BANCOS = [
     ('756', ['SICOOB', 'SISTEMA DE COOPERATIVAS DE CREDITO', 'BANCOOB']),
@@ -266,7 +270,8 @@ def _parse_texto(texto):
         if _contem(linha_norm, LINHAS_SALDO):
             fechar_pendente()
             buffer_desc = []
-            if valores:  # o último valor da linha é o saldo
+            if valores and not _contem(linha_norm, SALDOS_INFORMATIVOS):
+                # o último valor da linha é o saldo
                 saldos.append((len(transacoes), _valor_do_match(valores[-1])))
             continue
         if _contem(linha_norm, LINHAS_TOTAIS):
@@ -339,7 +344,8 @@ def _parse_texto(texto):
 
         # Segurança extra contra linhas de saldo não listadas
         if _sem_acentos(descricao).upper().startswith('SALDO'):
-            saldos.append((len(transacoes), valor))
+            if not _contem(_sem_acentos(descricao).upper(), SALDOS_INFORMATIVOS):
+                saldos.append((len(transacoes), valor))
             continue
 
         pendente = {
