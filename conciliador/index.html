@@ -121,11 +121,6 @@
 
             <div id="areaResultado" style="display:none">
                 <div class="resumo-extrato" id="resumoExtrato"></div>
-                <div class="card" id="alertaSaldo" style="display:none; border-color:#fca5a5; background:#fef2f2;">
-                    <label style="color:#991b1b">⚠ Conferência de saldo não bateu — podem faltar lançamentos</label>
-                    <p class="dica" style="color:#7f1d1d" id="alertaSaldoTexto"></p>
-                    <button class="btn-sec" onclick="mostrarTextoLido()">📄 Ver o texto lido do arquivo</button>
-                </div>
                 <div class="card" style="overflow-x:auto">
                     <div id="filtrosTabela" style="display:flex; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
                         <button class="btn-sec btn-filtro active" onclick="setFiltro('todas', this)">Todas</button>
@@ -485,28 +480,18 @@ function renderConciliacao() {
     const c = conciliacao;
     $('areaResultado').style.display = 'block';
     const dups = c.transacoes.filter(t => t.duplicada).length;
+    const entradas = c.transacoes.filter(t => t.tipo === 'entrada');
+    const saidas = c.transacoes.filter(t => t.tipo === 'saida');
     $('resumoExtrato').innerHTML = `
         <div><b>Arquivo</b>${esc(c.arquivo_nome)} (${c.formato})</div>
         <div><b>Banco</b>${esc(c.banco_nome)}${c.banco_codigo ? ' (' + c.banco_codigo + ')' : ''}</div>
         <div><b>Conta no extrato</b>${esc(c.agencia_extrato || '-')} / ${esc(c.conta_extrato || '-')}</div>
         <div><b>Período</b>${fmtData(c.periodo_inicio)} a ${fmtData(c.periodo_fim)}</div>
-        ${c.saldo_final != null ? `<div><b>Saldo final</b>${fmtMoeda(c.saldo_final)}</div>` : ''}
-        ${c.conferencia ? `<div><b>Conferência de saldo</b>${c.conferencia.ok
-            ? '<span class="badge badge-entrada">✓ confere</span>'
-            : `<span class="badge badge-dup">⚠ diferença ${fmtMoeda(c.conferencia.diferenca)}</span>`}</div>` : ''}
+        <div><b>Créditos no período</b><span class="valor-pos">${fmtMoeda(entradas.reduce((s, t) => s + t.valor, 0))}</span> (${entradas.length})</div>
+        <div><b>Débitos no período</b><span class="valor-neg">${fmtMoeda(-saidas.reduce((s, t) => s + Math.abs(t.valor), 0))}</span> (${saidas.length})</div>
         ${dups ? `<div><b>Já importadas</b><span class="badge badge-dup">${dups}</span></div>` : ''}
         ${c.formato === 'PDF' && c.texto_extraido ? '<div><b>Texto do PDF</b><button class="row-action" onclick="mostrarTextoLido()">ver o que foi lido</button></div>' : ''}
         ${!c.conta_bancaria_id ? '<div><b>⚠ Conta bancária</b>não identificada — selecione acima</div>' : ''}`;
-    if (c.conferencia && !c.conferencia.ok) {
-        $('alertaSaldoTexto').textContent =
-            `O extrato informa saldo inicial de ${fmtMoeda(c.conferencia.saldo_inicial)} e saldo final de ` +
-            `${fmtMoeda(c.conferencia.saldo_final)}, mas o movimento lido soma ${fmtMoeda(c.conferencia.movimento)} — ` +
-            `diferença de ${fmtMoeda(c.conferencia.diferenca)}. Compare o texto lido com o extrato original para ` +
-            `achar as linhas que faltam e envie o texto ao suporte para ajuste do leitor.`;
-        $('alertaSaldo').style.display = 'block';
-    } else {
-        $('alertaSaldo').style.display = 'none';
-    }
     const tb = $('tbodyTransacoes');
     tb.innerHTML = c.transacoes.map((t, i) => `
         <tr class="${t.duplicada ? 'dup ' : ''}${t.ignorar ? 'ignorada' : ''}" id="linha${i}" ${filtroMatch(t) ? '' : 'style="display:none"'}>
