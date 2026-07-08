@@ -104,10 +104,19 @@ O complemento aceita os modelos `{descricao}`, `{documento}`, `{data}` e
   por dia (Inter e extratos de app), histórico em várias linhas, texto com
   letras espaçadas e linhas de saldo ignoradas. A tela de conferência
   permite corrigir qualquer linha antes de exportar.
+- **Conferência de saldo**: quando o extrato traz saldo inicial e final, o
+  sistema confere se `saldo inicial + movimento lido = saldo final`. Se não
+  bater, um alerta mostra a diferença exata — sinal de que alguma linha do
+  PDF não foi reconhecida — e o botão "ver o texto lido" ajuda a localizar
+  o lançamento que falta comparando com o extrato original. Extrato íntegro
+  ganha o selo "✓ confere". Confira o selo antes de exportar.
 - **Diagnóstico**: se nenhuma transação for reconhecida, a tela mostra o
   texto que foi extraído do PDF. Se as transações aparecem nesse texto,
   copie-o e envie para o suporte ajustar o leitor àquele layout; se o texto
   estiver vazio, o PDF é imagem escaneada (use o OFX). PDFs protegidos por
   senha também não são lidos — salve uma cópia sem senha.
+- Transações **idênticas no mesmo dia** (mesmo valor e descrição, comum em
+  PIX de mesmo valor) são numeradas por ocorrência no controle de
+  duplicidade — a segunda não é confundida com reimportação da primeira.
 - Sempre que possível, **prefira o OFX**: é um formato estruturado, com
   identificador único por transação (controle de duplicidade mais preciso).

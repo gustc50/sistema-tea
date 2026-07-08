@@ -31,18 +31,29 @@ from datetime import datetime
 
 from ofx_parser import parse_valor, BANCOS
 
-# Palavras que identificam linhas de saldo/cabeçalho/rodapé, não transações
-LINHAS_IGNORADAS = [
+# Linhas de saldo: nunca são transações e o valor delas é capturado para a
+# conferência de saldo (inicial + movimento = final)
+LINHAS_SALDO = [
     'SALDO ANTERIOR', 'SALDO DO DIA', 'SALDO EM', 'SALDO ATUAL', 'SALDO FINAL',
     'SALDO BLOQUEADO', 'SALDO DISPONIVEL', 'SALDO TOTAL', 'S A L D O', 'SDO CTA',
     'SALDO INICIAL', 'SALDO DIA', 'SALDO ANT', 'SALDO A LIBERAR', 'SALDO LIBERADO',
+    'BLOQUEADO ANTERIOR',
+]
+# Totalizadores e cabeçalhos de coluna: nunca são transações
+LINHAS_TOTAIS = [
     'TOTAL DE ENTRADAS', 'TOTAL DE SAIDAS', 'TOTAL ENTRADAS', 'TOTAL SAIDAS',
     'RESUMO DO', 'DATA HISTORICO', 'DATA LANCAMENTO', 'DATA DESCRICAO',
     'DATA MOVIMENTO', 'DT. MOVIMENTO', 'DT.MOVIMENTO', 'DATA DOCUMENTO',
+]
+# Rodapés/avisos: ignorados SOMENTE quando a linha não tem cara de transação
+# (sem data + valor). Descrições reais podem conter estas palavras — ex.:
+# "PAGAMENTO FOLHA SALARIOS", "PAG. TITULO", "JUROS LIMITE" — e não podem
+# ser descartadas.
+LINHAS_RODAPE = [
     'EXTRATO DE CONTA', 'EXTRATO CONTA', 'PERIODO DO EXTRATO', 'OUVIDORIA',
     'SAC ', 'CENTRAL DE ATENDIMENTO', 'PAGINA ', 'PAG.', 'FOLHA ', 'LIMITE ',
     'CHEQUE ESPECIAL', 'APLICACOES AUTOMATICAS', 'ENCERRAMENTO',
-    'LANCAMENTOS FUTUROS', 'BLOQUEADO ANTERIOR',
+    'LANCAMENTOS FUTUROS',
 ]
 
 DETECCAO_BANCOS = [
@@ -115,8 +126,8 @@ def detectar_banco(texto):
     return ''
 
 
-def _linha_ignorada(linha_norm):
-    return any(p in linha_norm for p in LINHAS_IGNORADAS)
+def _contem(linha_norm, palavras):
+    return any(p in linha_norm for p in palavras)
 
 
 def _colapsar_letras_espacadas(linha):
@@ -217,6 +228,7 @@ def _parse_texto(texto):
     periodo = _anos_do_periodo(texto)
 
     transacoes = []
+    saldos = []          # (nº de transações já lidas, valor) das linhas de saldo
     data_corrente = ''   # layouts com data agrupada (Inter/app) ou omitida na linha
     pendente = None      # transação aguardando possível linha de complemento
     buffer_desc = []     # linhas de texto anteriores a um valor sem descrição
@@ -247,14 +259,25 @@ def _parse_texto(texto):
             buffer_desc = []
             continue
 
-        if _linha_ignorada(linha_norm):
-            fechar_pendente()
-            buffer_desc = []
-            continue
-
         valores = list(RE_VALOR.finditer(linha))
         m_data = RE_DATA.search(linha)
         m_curta = None if m_data else RE_DATA_CURTA.match(linha)
+
+        if _contem(linha_norm, LINHAS_SALDO):
+            fechar_pendente()
+            buffer_desc = []
+            if valores:  # o último valor da linha é o saldo
+                saldos.append((len(transacoes), _valor_do_match(valores[-1])))
+            continue
+        if _contem(linha_norm, LINHAS_TOTAIS):
+            fechar_pendente()
+            buffer_desc = []
+            continue
+        # Rodapés só descartam linhas que não têm cara de transação
+        if _contem(linha_norm, LINHAS_RODAPE) and not ((m_data or m_curta) and valores):
+            fechar_pendente()
+            buffer_desc = []
+            continue
 
         # Linha só com a data define o dia dos lançamentos seguintes
         if (m_data or m_curta) and not valores and len(linha) <= 12:
@@ -316,6 +339,7 @@ def _parse_texto(texto):
 
         # Segurança extra contra linhas de saldo não listadas
         if _sem_acentos(descricao).upper().startswith('SALDO'):
+            saldos.append((len(transacoes), valor))
             continue
 
         pendente = {
@@ -330,6 +354,14 @@ def _parse_texto(texto):
 
     fechar_pendente()
 
+    # Saldo inicial: linha de saldo antes de qualquer transação; saldo final:
+    # linha de saldo depois de todas. Com ambos dá para conferir o extrato.
+    saldo_inicial = saldo_final = None
+    if saldos and saldos[0][0] == 0 and len(saldos) >= 2:
+        saldo_inicial = round(saldos[0][1], 2)
+        if saldos[-1][0] == len(transacoes):
+            saldo_final = round(saldos[-1][1], 2)
+
     datas = sorted(t['data'] for t in transacoes)
     return {
         'banco_codigo': banco,
@@ -338,7 +370,8 @@ def _parse_texto(texto):
         'conta': conta,
         'data_inicio': datas[0] if datas else '',
         'data_fim': datas[-1] if datas else '',
-        'saldo_final': None,
+        'saldo_inicial': saldo_inicial,
+        'saldo_final': saldo_final,
         'transacoes': transacoes,
     }
 

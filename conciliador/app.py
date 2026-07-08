@@ -182,14 +182,30 @@ def _empresa_id(conn):
 
 
 def _hash_transacao(conta_bancaria_id, t):
-    """Identidade da transação para detectar reimportação (duplicidade)."""
+    """Identidade da transação para detectar reimportação (duplicidade).
+
+    Sem FITID (PDFs), transações legítimas idênticas no mesmo dia (mesmo
+    valor e descrição) são distinguidas pelo número da ocorrência dentro do
+    arquivo — senão a segunda seria marcada como duplicata da primeira."""
     chave = '%s|%s|%.2f|%s' % (
         conta_bancaria_id or '',
         t.get('data', ''),
         t.get('valor', 0.0),
         t.get('fitid') or normalizar(t.get('descricao', ''))[:120],
     )
+    if not t.get('fitid') and int(t.get('ocorrencia') or 1) > 1:
+        chave += '|%d' % int(t['ocorrencia'])
     return hashlib.sha1(chave.encode('utf-8')).hexdigest()
+
+
+def _numerar_ocorrencias(transacoes):
+    """Numera transações idênticas (data, valor, descrição) dentro do arquivo."""
+    contagem = {}
+    for t in transacoes:
+        if not t.get('fitid'):
+            base = (t['data'], round(float(t['valor']), 2), chave_descricao(t.get('descricao') or ''))
+            contagem[base] = contagem.get(base, 0) + 1
+            t['ocorrencia'] = contagem[base]
 
 
 # --- PÁGINA ---
@@ -563,6 +579,7 @@ def processar_arquivo():
     regras = [dict(r) for r in conn.execute(
         'SELECT * FROM regras WHERE empresa_id = ? AND ativo = 1', (eid,)).fetchall()]
     transacoes = extrato['transacoes']
+    _numerar_ocorrencias(transacoes)
     aplicar_regras(regras, transacoes, conta_bancaria['id'] if conta_bancaria else None)
 
     hashes_existentes = set()
@@ -604,6 +621,23 @@ def processar_arquivo():
         t['duplicada'] = t['hash'] in hashes_existentes
     conn.close()
 
+    # Conferência de saldo: quando o extrato traz saldo inicial e final,
+    # verifica se inicial + movimento lido = final. Diferença indica
+    # lançamentos que o leitor não reconheceu.
+    conferencia = None
+    saldo_inicial = extrato.get('saldo_inicial')
+    saldo_final = extrato.get('saldo_final')
+    if saldo_inicial is not None and saldo_final is not None:
+        movimento = round(sum(t['valor'] for t in transacoes), 2)
+        diferenca = round(saldo_final - (saldo_inicial + movimento), 2)
+        conferencia = {
+            'saldo_inicial': saldo_inicial,
+            'saldo_final': saldo_final,
+            'movimento': movimento,
+            'diferenca': diferenca,
+            'ok': abs(diferenca) < 0.005,
+        }
+
     return jsonify({
         'empresa_id': eid,
         'arquivo_nome': nome,
@@ -614,7 +648,9 @@ def processar_arquivo():
         'conta_extrato': extrato['conta'],
         'periodo_inicio': extrato['data_inicio'],
         'periodo_fim': extrato['data_fim'],
-        'saldo_final': extrato['saldo_final'],
+        'saldo_final': saldo_final,
+        'conferencia': conferencia,
+        'texto_extraido': texto_extraido if formato == 'PDF' else '',
         'conta_bancaria_id': conta_bancaria['id'] if conta_bancaria else None,
         'transacoes': transacoes,
     })

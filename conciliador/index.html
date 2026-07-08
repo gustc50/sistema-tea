@@ -111,7 +111,7 @@
             </div>
 
             <div class="card" id="areaDiagnostico" style="display:none; border-color:#fca5a5;">
-                <label style="color:#991b1b">⚠ Não foi possível interpretar o extrato — diagnóstico</label>
+                <label style="color:#991b1b" id="diagTitulo">⚠ Não foi possível interpretar o extrato — diagnóstico</label>
                 <p class="dica" style="margin-bottom:10px">Este é o texto que o sistema conseguiu ler do PDF.
                 Se as transações aparecem abaixo mas não foram reconhecidas, copie este texto e envie para o suporte
                 ajustar o leitor deste layout. Se estiver vazio ou ilegível, o PDF é uma imagem escaneada — use o arquivo OFX do banco.</p>
@@ -121,6 +121,11 @@
 
             <div id="areaResultado" style="display:none">
                 <div class="resumo-extrato" id="resumoExtrato"></div>
+                <div class="card" id="alertaSaldo" style="display:none; border-color:#fca5a5; background:#fef2f2;">
+                    <label style="color:#991b1b">⚠ Conferência de saldo não bateu — podem faltar lançamentos</label>
+                    <p class="dica" style="color:#7f1d1d" id="alertaSaldoTexto"></p>
+                    <button class="btn-sec" onclick="mostrarTextoLido()">📄 Ver o texto lido do arquivo</button>
+                </div>
                 <div class="card" style="overflow-x:auto">
                     <div id="filtrosTabela" style="display:flex; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
                         <button class="btn-sec btn-filtro active" onclick="setFiltro('todas', this)">Todas</button>
@@ -467,6 +472,7 @@ async function processarArquivo() {
         status(e.message, true);
         if (e.corpo && e.corpo.texto_extraido !== undefined) {
             $('areaResultado').style.display = 'none';
+            $('diagTitulo').textContent = '⚠ Não foi possível interpretar o extrato — diagnóstico';
             $('diagTexto').textContent = e.corpo.texto_extraido || '(nenhum texto foi extraído do PDF)';
             $('areaDiagnostico').style.display = 'block';
         }
@@ -484,9 +490,23 @@ function renderConciliacao() {
         <div><b>Banco</b>${esc(c.banco_nome)}${c.banco_codigo ? ' (' + c.banco_codigo + ')' : ''}</div>
         <div><b>Conta no extrato</b>${esc(c.agencia_extrato || '-')} / ${esc(c.conta_extrato || '-')}</div>
         <div><b>Período</b>${fmtData(c.periodo_inicio)} a ${fmtData(c.periodo_fim)}</div>
-        ${c.saldo_final != null ? `<div><b>Saldo final (OFX)</b>${fmtMoeda(c.saldo_final)}</div>` : ''}
+        ${c.saldo_final != null ? `<div><b>Saldo final</b>${fmtMoeda(c.saldo_final)}</div>` : ''}
+        ${c.conferencia ? `<div><b>Conferência de saldo</b>${c.conferencia.ok
+            ? '<span class="badge badge-entrada">✓ confere</span>'
+            : `<span class="badge badge-dup">⚠ diferença ${fmtMoeda(c.conferencia.diferenca)}</span>`}</div>` : ''}
         ${dups ? `<div><b>Já importadas</b><span class="badge badge-dup">${dups}</span></div>` : ''}
+        ${c.formato === 'PDF' && c.texto_extraido ? '<div><b>Texto do PDF</b><button class="row-action" onclick="mostrarTextoLido()">ver o que foi lido</button></div>' : ''}
         ${!c.conta_bancaria_id ? '<div><b>⚠ Conta bancária</b>não identificada — selecione acima</div>' : ''}`;
+    if (c.conferencia && !c.conferencia.ok) {
+        $('alertaSaldoTexto').textContent =
+            `O extrato informa saldo inicial de ${fmtMoeda(c.conferencia.saldo_inicial)} e saldo final de ` +
+            `${fmtMoeda(c.conferencia.saldo_final)}, mas o movimento lido soma ${fmtMoeda(c.conferencia.movimento)} — ` +
+            `diferença de ${fmtMoeda(c.conferencia.diferenca)}. Compare o texto lido com o extrato original para ` +
+            `achar as linhas que faltam e envie o texto ao suporte para ajuste do leitor.`;
+        $('alertaSaldo').style.display = 'block';
+    } else {
+        $('alertaSaldo').style.display = 'none';
+    }
     const tb = $('tbodyTransacoes');
     tb.innerHTML = c.transacoes.map((t, i) => `
         <tr class="${t.duplicada ? 'dup ' : ''}${t.ignorar ? 'ignorada' : ''}" id="linha${i}" ${filtroMatch(t) ? '' : 'style="display:none"'}>
@@ -577,6 +597,14 @@ function contaAlterada(i, input) {
         renderConciliacao();
         status(`Conta ${conta} aplicada a ${iguais.length + 1} transações com descrição semelhante.`);
     }
+}
+
+function mostrarTextoLido() {
+    if (!conciliacao || !conciliacao.texto_extraido) return;
+    $('diagTitulo').textContent = '📄 Texto lido do PDF — compare com o extrato original';
+    $('diagTexto').textContent = conciliacao.texto_extraido;
+    $('areaDiagnostico').style.display = 'block';
+    $('areaDiagnostico').scrollIntoView({ behavior: 'smooth' });
 }
 
 function copiarDiagnostico() {
