@@ -87,7 +87,7 @@
             <h1>Aplicação de Protocolos</h1>
             <div class="card form-grid">
                 <div><label>Paciente</label><select id="testPatientSelect"><option value="">Selecione...</option></select></div>
-                <div><label>Protocolo</label><select id="testType" onchange="renderTestForm()"><option value="">Selecione...</option><option value="aq">AQ (Adultos)</option><option value="mchat">M-CHAT-R/F (Crianças)</option></select></div>
+                <div><label>Protocolo</label><select id="testType" onchange="renderTestForm()"><option value="">Selecione...</option><option value="aq10">AQ-10 (Adultos)</option><option value="aq50">AQ-50 (Adultos)</option><option value="mchat">M-CHAT-R/F (Crianças)</option></select></div>
             </div>
             <form id="dynamicTestForm" class="card" style="display:none;"></form>
         </div>
@@ -222,8 +222,123 @@
 <script>
 const API = '';
 const TESTS_CONFIG = {
-    aq: { name: "AQ - Autism Spectrum Quotient", options: [{value:'agree',label:'Sim/Concordo'},{value:'disagree',label:'Não/Discordo'}], questions: ["Prefiro fazer coisas com outras pessoas.","Prefiro fazer as coisas sempre da mesma maneira.","Me interesso mais pelas partes do que pelo todo.","Acho difícil imaginar ser outra pessoa.","Situações sociais são fáceis para mim."], scoring: a => { let s=0; a.forEach((v,i)=>{if((i%2===0&&v==='agree')||(i%2!==0&&v==='disagree'))s++;}); return {score:s,max:5,interpretation:s>=3?"Indicativo de traços autísticos. Avaliação especializada recomendada.":"Baixa probabilidade de traços significativos."}; } },
-    mchat: { name: "M-CHAT-R/F (Amostra)", options: [{value:'yes',label:'Sim'},{value:'no',label:'Não'}], questions: ["Olha para onde você aponta?","Já suspeitou de perda auditiva?","Brinca de faz-de-conta?","Responde quando chamado?","Aponta para pedir algo?"], scoring: a => { let r=a.filter(v=>v==='no').length; return {score:r,max:5,interpretation:r>=2?"Risco elevado. Encaminhamento recomendado.":"Baixo risco. Monitorar desenvolvimento."}; } }
+    // AQ-10 (Adulto) - SUBPAV/Rio Saúde, 2023, adaptado da versão portuguesa (NICE Clinical Guideline CG142).
+    // Chave de pontuação e corte (>6 = alto risco) conforme impresso no instrumento oficial.
+    aq10: {
+        name: "AQ-10 - Quociente do Espectro do Autismo (Adultos)",
+        options: [
+            {value:'agree_full', label:'Concordo Totalmente'},
+            {value:'agree_partial', label:'Concordo em Parte'},
+            {value:'disagree_partial', label:'Discordo em Parte'},
+            {value:'disagree_full', label:'Discordo Totalmente'}
+        ],
+        questions: [
+            "Costumo notar pequenos sons quando outros não percebem",
+            "Eu geralmente me concentro mais no todo de uma imagem, ao invés de pequenos detalhes",
+            "Acho fácil fazer mais de uma coisa de uma só vez",
+            "Se houver uma interrupção, posso voltar para o que eu estava fazendo muito rápido",
+            "Acho fácil “ler nas entrelinhas” quando alguém esta falando comigo",
+            "Eu sei dizer se alguém que está me ouvindo está ficando entediado",
+            "Quando estou lendo uma história, acho difícil descobrir as intenções dos personagens",
+            "Gosto de coletar informações sobre categorias de coisas (por exemplo, tipos de carro, tipos de pássaros, tipos de trem, tipos de planta, etc.)",
+            "Acho que é fácil descobrir o que alguém está pensando ou sentindo apenas olhando para o rosto da pessoa",
+            "Acho difícil entender as intenções das pessoas"
+        ],
+        isHighScore: s => s > 6,
+        scoring: a => {
+            const agreeItems = [1,5,7,10];
+            const disagreeItems = [2,3,4,6,8,9];
+            let s = 0;
+            agreeItems.forEach(i => { if(['agree_full','agree_partial'].includes(a[i-1])) s++; });
+            disagreeItems.forEach(i => { if(['disagree_full','disagree_partial'].includes(a[i-1])) s++; });
+            return {
+                score: s, max: 10,
+                interpretation: s > 6
+                    ? "Pontuação acima de 6: indicativo de alto risco para traços do espectro autista. Avaliação especializada recomendada."
+                    : "Pontuação dentro da faixa esperada (≤ 6). Baixa indicação de traços significativos neste rastreio."
+            };
+        }
+    },
+    // AQ-50 (Adulto) - Baron-Cohen, Wheelwright, Skinner, Martin & Clubley (2001); versão em português de
+    // Ana Osório, Beatriz Sanchez e Júlia Egito (Mackenzie, 2017). O material fornecido não trazia a chave
+    // de pontuação impressa; aplicamos aqui a chave de pontuação original publicada pelos autores, com o
+    // corte de 32 pontos citado no artigo original como sugestivo de níveis clinicamente significativos.
+    aq50: {
+        name: "AQ-50 - Quociente do Espectro do Autismo (Adultos)",
+        options: [
+            {value:'agree_full', label:'Concordo Totalmente'},
+            {value:'agree_slight', label:'Concordo Ligeiramente'},
+            {value:'disagree_slight', label:'Discordo Ligeiramente'},
+            {value:'disagree_full', label:'Discordo Totalmente'}
+        ],
+        questions: [
+            "Prefiro fazer coisas com outras pessoas do que sozinho(a).",
+            "Prefiro fazer as coisas sempre da mesma maneira.",
+            "Quando tento imaginar uma coisa, tenho muita facilidade em criar uma imagem na minha mente.",
+            "Com frequência fico tão absorvido(a) com uma coisa que esqueço todo o resto.",
+            "Frequentemente noto pequenos ruídos que outras pessoas não ouvem.",
+            "Costumo prestar atenção aos números das placas dos automóveis ou a outras sequências de informação do mesmo tipo.",
+            "As outras pessoas com frequência me dizem que falei algo indelicado, apesar de eu achar que fui delicado(a).",
+            "Quando leio uma história, consigo imaginar facilmente a aparência dos personagens.",
+            "Sou fascinado por datas.",
+            "Quando estou em grupo, tenho facilidade em seguir várias conversas ao mesmo tempo.",
+            "Tenho facilidade em compreender situações sociais.",
+            "Tenho tendência a notar detalhes que os outros não reparam.",
+            "Prefiro ir a uma biblioteca do que a uma festa.",
+            "Tenho facilidade em inventar histórias.",
+            "Tenho maior tendência a me aproximar de pessoas do que de coisas.",
+            "Tenho tendência a ter interesses fortes e fico incomodado(a) se não posso me dedicar a eles.",
+            "Gosto de bater papo.",
+            "Quando estou falando, as outras pessoas têm dificuldade em tomar a palavra.",
+            "Os números me fascinam.",
+            "Quando leio uma história, sinto dificuldade em entender as intenções dos personagens.",
+            "Não aprecio ler livros de ficção.",
+            "Tenho dificuldade em fazer novos amigos.",
+            "Vejo constantemente padrões nas coisas que me rodeiam.",
+            "Prefiro ir ao teatro do que ir a um museu.",
+            "Não fico incomodado(a) se minha rotina diária for alterada.",
+            "Com frequência sinto que não sei manter uma conversa.",
+            "Tenho facilidade em “ler nas entrelinhas” quando falam comigo.",
+            "Geralmente me concentro mais no todo do que nos detalhes.",
+            "Não sou muito bom/boa em lembrar números de telefone.",
+            "Geralmente não reparo nas pequenas mudanças de uma situação ou na aparência de uma pessoa.",
+            "Consigo dizer quando a pessoa com quem estou conversando fica entediada.",
+            "Consigo facilmente fazer mais do que uma coisa ao mesmo tempo.",
+            "Quando falo no telefone, não tenho a certeza quando é a minha vez de falar.",
+            "Gosto de fazer as coisas de forma espontânea.",
+            "Com frequência sou o(a) último(a) que entende uma piada.",
+            "Tenho facilidade em entender o que uma pessoa está pensando ou sentindo apenas olhando para o seu rosto.",
+            "Se sou interrompido(a), consigo rapidamente voltar ao que estava fazendo.",
+            "Sou bom/boa de papo.",
+            "Os outros frequentemente me dizem que eu insisto muito nas mesmas coisas.",
+            "Quando era criança, gostava de brincar de faz-de-conta com as outras crianças.",
+            "Gosto de colecionar informação sobre categorias de coisas (p. ex., tipos de carros, de aves, de trens, de plantas, etc.).",
+            "Tenho dificuldade de me imaginar na pele de outra pessoa.",
+            "Gosto de planejar com cuidado todas as atividades em que participo.",
+            "Aprecio eventos sociais.",
+            "Tenho dificuldade em entender as intenções das outras pessoas.",
+            "Situações novas me deixam ansioso(a).",
+            "Gosto de conhecer pessoas novas.",
+            "Tenho uma postura conciliadora em situações de interação social.",
+            "Tenho dificuldade em lembrar o dia de aniversário dos outros.",
+            "Tenho muita facilidade em brincar de faz-de-conta com as crianças."
+        ],
+        isHighScore: s => s >= 32,
+        scoring: a => {
+            const agreeItems = [2,4,5,6,7,9,12,13,16,18,19,20,21,22,23,26,33,35,39,41,42,43,45,46];
+            const disagreeItems = [1,3,8,10,11,14,15,17,24,25,27,28,29,30,31,32,34,36,37,38,40,44,47,48,49,50];
+            let s = 0;
+            agreeItems.forEach(i => { if(['agree_full','agree_slight'].includes(a[i-1])) s++; });
+            disagreeItems.forEach(i => { if(['disagree_full','disagree_slight'].includes(a[i-1])) s++; });
+            return {
+                score: s, max: 50,
+                interpretation: s >= 32
+                    ? "Pontuação igual ou acima de 32: sugestiva de níveis clinicamente significativos de traços do espectro autista. Avaliação especializada recomendada."
+                    : "Pontuação abaixo do corte de referência (32). Baixa indicação de traços significativos neste rastreio."
+            };
+        }
+    },
+    mchat: { name: "M-CHAT-R/F (Amostra)", options: [{value:'yes',label:'Sim'},{value:'no',label:'Não'}], questions: ["Olha para onde você aponta?","Já suspeitou de perda auditiva?","Brinca de faz-de-conta?","Responde quando chamado?","Aponta para pedir algo?"], isHighScore: s => s >= 2, scoring: a => { let r=a.filter(v=>v==='no').length; return {score:r,max:5,interpretation:r>=2?"Risco elevado. Encaminhamento recomendado.":"Baixo risco. Monitorar desenvolvimento."}; } }
 };
 
 const MODULES = [
@@ -552,7 +667,7 @@ function renderTestForm() {
     let html = `<h3 style="margin-bottom:20px;color:var(--primary);">${cfg.name}</h3>`;
     cfg.questions.forEach((q,i) => {
         const optsHtml = cfg.options.map((o,oi) => `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;text-transform:none;font-weight:normal;"><input type="radio" name="q${i}" value="${o.value}"${oi===0?' required':''}> ${escapeHtml(o.label)}</label>`).join('');
-        html += `<div style="margin-bottom:15px;padding:15px;background:#f8fafc;border-radius:8px;"><label style="margin-bottom:10px;font-size:0.95rem;color:#334155;text-transform:none;">${i+1}. ${escapeHtml(q)}</label><div style="display:flex;gap:15px;">${optsHtml}</div></div>`;
+        html += `<div style="margin-bottom:15px;padding:15px;background:#f8fafc;border-radius:8px;"><label style="margin-bottom:10px;font-size:0.95rem;color:#334155;text-transform:none;">${i+1}. ${escapeHtml(q)}</label><div style="display:flex;gap:12px;flex-wrap:wrap;">${optsHtml}</div></div>`;
     });
     html += `<button type="button" class="btn-primary" style="width:100%;margin-top:10px;" onclick="calculateResult('${type}')">📊 Calcular e Salvar</button>`;
     form.innerHTML = html; form.style.display = 'block';
@@ -566,7 +681,7 @@ async function calculateResult(type) {
     const result = TESTS_CONFIG[type].scoring(answers);
     await api('/api/tests', 'POST', { patientId: Number(pid), type, ...result });
     showStatus('✅ Resultado salvo no banco de dados!');
-    const isHigh = (type==='aq'&&result.score>=3)||(type==='mchat'&&result.score>=2);
+    const isHigh = TESTS_CONFIG[type].isHighScore(result.score);
     document.getElementById('dynamicTestForm').innerHTML = `<div class="result-panel"><div class="score-big">${result.score}/${result.max}</div><div><h3 style="margin-bottom:8px;color:${isHigh?'#991b1b':'#166534'}">${isHigh?'⚠️ Elevado':'✅ Normal'}</h3><p>${escapeHtml(result.interpretation)}</p><button type="button" class="btn-primary" style="margin-top:15px;padding:8px 16px;font-size:0.85rem;" onclick="openProntuario(${Number(pid)})">Ver Prontuário →</button></div></div>`;
 }
 
@@ -583,7 +698,7 @@ async function loadProntuario() {
     const tbody = document.getElementById('testHistoryTable');
     tbody.innerHTML = tests.length ? '' : '<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:20px;">Sem avaliações.</td></tr>';
     tests.forEach(t => {
-        const isHigh = (t.type==='aq'&&t.score>=3)||(t.type==='mchat'&&t.score>=2);
+        const isHigh = TESTS_CONFIG[t.type]?.isHighScore?.(t.score) ?? false;
         tbody.innerHTML += `<tr><td>${new Date(t.date).toLocaleDateString('pt-BR')}</td><td><strong>${escapeHtml(TESTS_CONFIG[t.type]?.name||t.type)}</strong></td><td><span class="badge ${isHigh?'badge-high':'badge-low'}">${t.score}/${t.max_score}</span></td><td style="font-size:0.85rem;color:#64748b;">${escapeHtml(t.interpretation)}</td></tr>`;
     });
 
