@@ -338,7 +338,57 @@ const TESTS_CONFIG = {
             };
         }
     },
-    mchat: { name: "M-CHAT-R/F (Amostra)", options: [{value:'yes',label:'Sim'},{value:'no',label:'Não'}], questions: ["Olha para onde você aponta?","Já suspeitou de perda auditiva?","Brinca de faz-de-conta?","Responde quando chamado?","Aponta para pedir algo?"], isHighScore: s => s >= 2, scoring: a => { let r=a.filter(v=>v==='no').length; return {score:r,max:5,interpretation:r>=2?"Risco elevado. Encaminhamento recomendado.":"Baixo risco. Monitorar desenvolvimento."}; } }
+    // M-CHAT-R™ - Robins, Fein & Barton (2009). Tradução: Losapio, Siquara, Lampreia, Lázaro & Pondé.
+    // Chave de pontuação oficial: para todos os itens, exceto 2, 5 e 12, a resposta "Não" indica risco.
+    // Para os itens 2, 5 e 12, é a resposta "Sim" que indica risco (surdez, movimentos repetitivos com os
+    // dedos e hipersensibilidade a barulhos são os únicos itens onde "sim" é o sinal de alerta).
+    mchat: {
+        name: "M-CHAT-R™ (Crianças)",
+        intro: "Por favor, responda as questões abaixo sobre o seu filho. Pense em como ele geralmente se comporta. Se você viu o seu filho apresentar o comportamento descrito poucas vezes, ou seja, não for um comportamento frequente, então responda “não”. Por favor, marque “sim” ou “não” para todas as questões.",
+        citation: "© 2009 Robins, Fein, & Barton. Tradução: Losapio, Siquara, Lampreia, Lázaro, & Pondé.",
+        options: [{value:'yes',label:'Sim'},{value:'no',label:'Não'}],
+        questions: [
+            "Se você apontar para algum objeto no quarto, o seu filho olha para este objeto? (POR EXEMPLO, se você apontar para um brinquedo ou animal, o seu filho olha para o brinquedo ou para o animal?)",
+            "Alguma vez você se perguntou se o seu filho pode ser surdo?",
+            "O seu filho brinca de faz de contas? (POR EXEMPLO, faz de conta que bebe em um copo vazio, faz de conta que fala ao telefone, faz de conta que dá comida a uma boneca ou a um bichinho de pelúcia?)",
+            "O seu filho gosta de subir nas coisas? (POR EXEMPLO, móveis, brinquedos em parques ou escadas)",
+            "O seu filho faz movimentos estranhos com os dedos perto dos olhos? (POR EXEMPLO, mexe os dedos em frente aos olhos e fica olhando para os mesmos?)",
+            "O seu filho aponta com o dedo para pedir algo ou para conseguir ajuda? (POR EXEMPLO, aponta para um biscoito ou brinquedo fora do alcance dele?)",
+            "O seu filho aponta com o dedo para mostrar algo interessante para você? (POR EXEMPLO, aponta para um avião no céu ou um caminhão grande na rua?)",
+            "O seu filho se interessa por outras crianças? (POR EXEMPLO, seu filho olha para outras crianças, sorri para elas ou se aproxima delas?)",
+            "O seu filho traz coisas para mostrar para você ou as segura para que você as veja - não para conseguir ajuda, mas apenas para compartilhar? (POR EXEMPLO, para mostrar uma flor, um bichinho de pelúcia ou um caminhão de brinquedo)",
+            "O seu filho responde quando você o chama pelo nome? (POR EXEMPLO, ele olha para você, fala ou emite algum som, ou para o que está fazendo quando você o chama pelo nome?)",
+            "Quando você sorri para o seu filho, ele sorri de volta para você?",
+            "O seu filho fica muito incomodado com barulhos do dia a dia? (POR EXEMPLO, seu filho grita ou chora ao ouvir barulhos como os de liquidificador ou de música alta?)",
+            "O seu filho anda?",
+            "O seu filho olha nos seus olhos quando está falando ou brincando com ele/ela, ou vestindo a roupa dele/dela?",
+            "O seu filho tenta imitar o que você faz? (POR EXEMPLO, quando você dá tchau, ou bate palmas, ou joga um beijo, ele repete o que você faz?)",
+            "Quando você vira a cabeça para olhar para alguma coisa, o seu filho olha ao redor para ver o que você está olhando?",
+            "O seu filho tenta fazer você olhar para ele/ela? (POR EXEMPLO, o seu filho olha para você para ser elogiado/aplaudido, ou diz: “olha mãe!” ou “ôh mãe!”)",
+            "O seu filho compreende quando você pede para ele/ela fazer alguma coisa? (POR EXEMPLO, se você não apontar, o seu filho entende quando você pede: “coloca o copo na mesa” ou “liga a televisão”?)",
+            "Quando acontece algo novo, o seu filho olha para o seu rosto para ver como você se sente sobre o que aconteceu? (POR EXEMPLO, se ele/ela ouve um barulho estranho ou vê algo engraçado, ou vê um brinquedo novo, será que ele/ela olharia para seu rosto?)",
+            "O seu filho gosta de atividades de movimento? (POR EXEMPLO, ser balançado ou pular em seus joelhos)."
+        ],
+        isHighScore: s => s >= 3,
+        scoring: a => {
+            const yesFailItems = [2, 5, 12];
+            let score = 0;
+            a.forEach((v, i) => {
+                const qNum = i + 1;
+                const failAnswer = yesFailItems.includes(qNum) ? 'yes' : 'no';
+                if (v === failAnswer) score++;
+            });
+            let interpretation;
+            if (score <= 2) {
+                interpretation = "Baixo risco (0-2 pontos). Se a criança tiver menos de 24 meses, repetir o rastreio após os 24 meses. Nenhuma ação adicional necessária, salvo se houver preocupação clínica.";
+            } else if (score <= 7) {
+                interpretation = "Risco médio (3-7 pontos). Recomenda-se aplicar a Entrevista de Follow-Up (M-CHAT-R/F) nos itens em que a criança apresentou risco. Se a pontuação da entrevista permanecer ≥ 2, encaminhar para avaliação especializada.";
+            } else {
+                interpretation = "Alto risco (8-20 pontos). Encaminhamento imediato para avaliação diagnóstica e elegibilidade para intervenção precoce, sem necessidade de aplicar a Entrevista de Follow-Up.";
+            }
+            return { score, max: 20, interpretation };
+        }
+    }
 };
 
 const MODULES = [
@@ -665,10 +715,16 @@ function renderTestForm() {
     if(!type) { form.style.display='none'; return; }
     const cfg = TESTS_CONFIG[type];
     let html = `<h3 style="margin-bottom:20px;color:var(--primary);">${cfg.name}</h3>`;
+    if (cfg.intro) {
+        html += `<p style="margin-bottom:20px;color:#64748b;font-size:0.9rem;line-height:1.5;">${escapeHtml(cfg.intro)}</p>`;
+    }
     cfg.questions.forEach((q,i) => {
         const optsHtml = cfg.options.map((o,oi) => `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;text-transform:none;font-weight:normal;"><input type="radio" name="q${i}" value="${o.value}"${oi===0?' required':''}> ${escapeHtml(o.label)}</label>`).join('');
         html += `<div style="margin-bottom:15px;padding:15px;background:#f8fafc;border-radius:8px;"><label style="margin-bottom:10px;font-size:0.95rem;color:#334155;text-transform:none;">${i+1}. ${escapeHtml(q)}</label><div style="display:flex;gap:12px;flex-wrap:wrap;">${optsHtml}</div></div>`;
     });
+    if (cfg.citation) {
+        html += `<p style="margin:5px 0 15px;color:#94a3b8;font-size:0.75rem;">${escapeHtml(cfg.citation)}</p>`;
+    }
     html += `<button type="button" class="btn-primary" style="width:100%;margin-top:10px;" onclick="calculateResult('${type}')">📊 Calcular e Salvar</button>`;
     form.innerHTML = html; form.style.display = 'block';
 }
