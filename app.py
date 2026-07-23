@@ -32,6 +32,12 @@ def init_db():
             dob TEXT,
             contact TEXT,
             patient_since TEXT,
+            address TEXT,
+            guardian_name TEXT,
+            guardian_cpf TEXT,
+            guardian_dob TEXT,
+            guardian_relationship TEXT,
+            payment_responsible TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS tests (
@@ -108,6 +114,15 @@ def init_db():
         conn.execute("UPDATE patients SET patient_since = date(created_at) WHERE patient_since IS NULL")
         conn.commit()
 
+    # Bancos criados antes do endereço e do bloco "Responsável" existirem
+    # não têm essas colunas.
+    patient_cols = [r['name'] for r in conn.execute("PRAGMA table_info(patients)").fetchall()]
+    for col in ('address', 'guardian_name', 'guardian_cpf', 'guardian_dob',
+                'guardian_relationship', 'payment_responsible'):
+        if col not in patient_cols:
+            conn.execute(f'ALTER TABLE patients ADD COLUMN {col} TEXT')
+    conn.commit()
+
     # A tabela `notes` mudou de "1 nota mutável por paciente" para "vários
     # atendimentos imutáveis, com data/hora". Se o banco já existir com o
     # esquema antigo (sem coluna `id`), migra os dados preservando a nota
@@ -159,14 +174,25 @@ def add_patient():
     if not name or not patient_since:
         return jsonify({'error': 'name e patient_since são obrigatórios'}), 400
     conn = get_db()
-    cursor = conn.execute(
-        'INSERT INTO patients (name, dob, contact, patient_since) VALUES (?, ?, ?, ?)',
-        (name, data.get('dob'), data.get('contact'), patient_since)
-    )
+    cursor = conn.execute('''
+        INSERT INTO patients (name, dob, contact, patient_since, address,
+            guardian_name, guardian_cpf, guardian_dob, guardian_relationship, payment_responsible)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        name, data.get('dob'), data.get('contact'), patient_since, data.get('address'),
+        data.get('guardian_name'), data.get('guardian_cpf'), data.get('guardian_dob'),
+        data.get('guardian_relationship'), data.get('payment_responsible')
+    ))
     conn.commit()
     new_id = cursor.lastrowid
     conn.close()
-    return jsonify({'id': new_id, 'name': name, 'dob': data.get('dob'), 'contact': data.get('contact'), 'patient_since': patient_since}), 201
+    return jsonify({
+        'id': new_id, 'name': name, 'dob': data.get('dob'), 'contact': data.get('contact'),
+        'patient_since': patient_since, 'address': data.get('address'),
+        'guardian_name': data.get('guardian_name'), 'guardian_cpf': data.get('guardian_cpf'),
+        'guardian_dob': data.get('guardian_dob'), 'guardian_relationship': data.get('guardian_relationship'),
+        'payment_responsible': data.get('payment_responsible')
+    }), 201
 
 @app.route('/api/tests', methods=['POST'])
 def save_test():

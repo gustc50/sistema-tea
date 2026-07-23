@@ -71,8 +71,31 @@
                     <div class="form-full"><label>Nome Completo</label><input type="text" id="pName"></div>
                     <div><label>Data de Nascimento</label><input type="date" id="pDob"></div>
                     <div><label>Paciente Desde *</label><input type="date" id="pSince" required></div>
-                    <div class="form-full"><label>Contato</label><input type="tel" id="pContact"></div>
-                    <div class="form-full"><button class="btn-primary" onclick="savePatient()">💾 Salvar Paciente</button></div>
+                    <div class="form-full"><label>Telefone de Contato</label><input type="tel" id="pContact"></div>
+                    <div class="form-full"><label>Endereço</label><input type="text" id="pAddress"></div>
+                </div>
+            </div>
+            <div class="card">
+                <label>Responsável</label>
+                <div class="form-grid" style="margin-top:15px;">
+                    <div class="form-full"><label>Nome do Responsável</label><input type="text" id="pGuardianName"></div>
+                    <div><label>CPF do Responsável</label><input type="text" id="pGuardianCpf" placeholder="000.000.000-00"></div>
+                    <div><label>Data de Nascimento do Responsável</label><input type="date" id="pGuardianDob"></div>
+                    <div class="form-full"><label>Parentesco</label><input type="text" id="pGuardianRelationship" placeholder="Ex: Mãe, Pai, Avó, Tutor(a) legal..."></div>
+                </div>
+            </div>
+            <div class="card">
+                <label>Responsável pelo Pagamento</label>
+                <div style="display:flex;gap:25px;margin-top:15px;">
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:normal;font-size:0.95rem;color:#334155;">
+                        <input type="radio" name="pPaymentResponsible" value="responsavel" style="width:auto;"> Responsável
+                    </label>
+                    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;text-transform:none;font-weight:normal;font-size:0.95rem;color:#334155;">
+                        <input type="radio" name="pPaymentResponsible" value="paciente" style="width:auto;"> Paciente
+                    </label>
+                </div>
+                <div style="margin-top:20px;display:flex;justify-content:flex-end;">
+                    <button class="btn-primary" onclick="savePatient()">💾 Salvar Paciente</button>
                 </div>
             </div>
             <div class="card">
@@ -703,9 +726,30 @@ async function savePatient() {
     const patientSince = document.getElementById('pSince').value;
     if(!name) return alert('Nome obrigatório');
     if(!patientSince) return alert('Informe a data "Paciente Desde".');
-    await api('/api/patients', 'POST', { name, dob: document.getElementById('pDob').value, contact: document.getElementById('pContact').value, patient_since: patientSince });
+    const paymentResponsible = document.querySelector('input[name=pPaymentResponsible]:checked')?.value || '';
+    await api('/api/patients', 'POST', {
+        name,
+        dob: document.getElementById('pDob').value,
+        contact: document.getElementById('pContact').value,
+        patient_since: patientSince,
+        address: document.getElementById('pAddress').value,
+        guardian_name: document.getElementById('pGuardianName').value,
+        guardian_cpf: document.getElementById('pGuardianCpf').value,
+        guardian_dob: document.getElementById('pGuardianDob').value,
+        guardian_relationship: document.getElementById('pGuardianRelationship').value,
+        payment_responsible: paymentResponsible
+    });
     showStatus('✅ Paciente salvo no banco de dados!');
-    document.getElementById('pName').value = ''; document.getElementById('pDob').value = ''; document.getElementById('pContact').value = ''; document.getElementById('pSince').value = '';
+    document.getElementById('pName').value = '';
+    document.getElementById('pDob').value = '';
+    document.getElementById('pContact').value = '';
+    document.getElementById('pSince').value = '';
+    document.getElementById('pAddress').value = '';
+    document.getElementById('pGuardianName').value = '';
+    document.getElementById('pGuardianCpf').value = '';
+    document.getElementById('pGuardianDob').value = '';
+    document.getElementById('pGuardianRelationship').value = '';
+    document.querySelectorAll('input[name=pPaymentResponsible]').forEach(el => el.checked = false);
     refreshLists();
 }
 
