@@ -71,6 +71,7 @@ def init_db():
             clinic_close_time TEXT NOT NULL DEFAULT '18:00',
             session_duration_minutes INTEGER NOT NULL DEFAULT 50,
             buffer_minutes INTEGER NOT NULL DEFAULT 10,
+            session_price REAL NOT NULL DEFAULT 0,
             clinic_name TEXT,
             clinic_document TEXT,
             clinic_logo TEXT,
@@ -87,6 +88,8 @@ def init_db():
             date TEXT NOT NULL,
             start_time TEXT NOT NULL,
             end_time TEXT NOT NULL,
+            paid INTEGER NOT NULL DEFAULT 0,
+            paid_date TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (patient_id) REFERENCES patients(id),
             FOREIGN KEY (professional_id) REFERENCES professionals(id)
@@ -103,6 +106,17 @@ def init_db():
                 'clinic_number', 'clinic_neighborhood', 'clinic_zip'):
         if col not in settings_cols:
             conn.execute(f'ALTER TABLE settings ADD COLUMN {col} TEXT')
+    if 'session_price' not in settings_cols:
+        conn.execute('ALTER TABLE settings ADD COLUMN session_price REAL DEFAULT 0')
+    conn.commit()
+
+    # Bancos criados antes do módulo Financeiro não têm as colunas de
+    # controle de pagamento em `appointments`.
+    appt_cols = [r['name'] for r in conn.execute("PRAGMA table_info(appointments)").fetchall()]
+    if 'paid' not in appt_cols:
+        conn.execute('ALTER TABLE appointments ADD COLUMN paid INTEGER DEFAULT 0')
+    if 'paid_date' not in appt_cols:
+        conn.execute('ALTER TABLE appointments ADD COLUMN paid_date TEXT')
     conn.commit()
 
     # Bancos criados antes do campo "paciente desde" existir não têm essa
@@ -307,20 +321,21 @@ def update_settings():
     try:
         session_duration_minutes = int(data.get('session_duration_minutes'))
         buffer_minutes = int(data.get('buffer_minutes'))
+        session_price = float(data.get('session_price') or 0)
     except (TypeError, ValueError):
-        return jsonify({'error': 'session_duration_minutes e buffer_minutes devem ser números'}), 400
-    if not clinic_open_time or not clinic_close_time or session_duration_minutes <= 0 or buffer_minutes < 0:
+        return jsonify({'error': 'session_duration_minutes, buffer_minutes e session_price devem ser números'}), 400
+    if not clinic_open_time or not clinic_close_time or session_duration_minutes <= 0 or buffer_minutes < 0 or session_price < 0:
         return jsonify({'error': 'Dados de configuração inválidos'}), 400
     conn = get_db()
     conn.execute('''
         UPDATE settings SET clinic_open_time = ?, clinic_close_time = ?,
-            session_duration_minutes = ?, buffer_minutes = ?,
+            session_duration_minutes = ?, buffer_minutes = ?, session_price = ?,
             clinic_name = ?, clinic_document = ?, clinic_logo = ?,
             clinic_street = ?, clinic_number = ?, clinic_neighborhood = ?, clinic_zip = ?,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = 1
     ''', (
-        clinic_open_time, clinic_close_time, session_duration_minutes, buffer_minutes,
+        clinic_open_time, clinic_close_time, session_duration_minutes, buffer_minutes, session_price,
         data.get('clinic_name'), data.get('clinic_document'), data.get('clinic_logo'),
         data.get('clinic_street'), data.get('clinic_number'), data.get('clinic_neighborhood'), data.get('clinic_zip')
     ))
@@ -406,6 +421,62 @@ def delete_appointment(appointment_id):
     conn.commit()
     conn.close()
     return jsonify({'status': 'ok'})
+
+@app.route('/api/financeiro', methods=['GET'])
+def get_financeiro():
+    year = request.args.get('year')
+    month = request.args.get('month')
+    if not year or not month:
+        return jsonify({'error': 'year e month são obrigatórios'}), 400
+    try:
+        month_prefix = f'{int(year):04d}-{int(month):02d}'
+    except ValueError:
+        return jsonify({'error': 'year e month inválidos'}), 400
+    conn = get_db()
+    rows = conn.execute('''
+        SELECT a.id, a.patient_id, a.professional_id, a.date, a.start_time, a.end_time,
+               a.paid, a.paid_date, p.name AS patient_name, p.payment_responsible, p.guardian_name
+        FROM appointments a
+        JOIN patients p ON p.id = a.patient_id
+        WHERE a.date LIKE ?
+        ORDER BY a.date, a.start_time
+    ''', (month_prefix + '%',)).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+@app.route('/api/appointments/<int:appointment_id>/pay', methods=['POST'])
+def pay_appointment(appointment_id):
+    data = request.json
+    paid_date = (data.get('paid_date') or '').strip()
+    if not paid_date:
+        return jsonify({'error': 'paid_date é obrigatório'}), 400
+    conn = get_db()
+    conn.execute('UPDATE appointments SET paid = 1, paid_date = ? WHERE id = ?', (paid_date, appointment_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'ok'})
+
+@app.route('/api/appointments/pay-all', methods=['POST'])
+def pay_all_appointments():
+    data = request.json
+    year = data.get('year')
+    month = data.get('month')
+    paid_date = (data.get('paid_date') or '').strip()
+    if not year or not month or not paid_date:
+        return jsonify({'error': 'year, month e paid_date são obrigatórios'}), 400
+    try:
+        month_prefix = f'{int(year):04d}-{int(month):02d}'
+    except ValueError:
+        return jsonify({'error': 'year e month inválidos'}), 400
+    conn = get_db()
+    cursor = conn.execute(
+        "UPDATE appointments SET paid = 1, paid_date = ? WHERE date LIKE ? AND (paid IS NULL OR paid = 0)",
+        (paid_date, month_prefix + '%')
+    )
+    conn.commit()
+    updated = cursor.rowcount
+    conn.close()
+    return jsonify({'status': 'ok', 'updated': updated})
 
 if __name__ == '__main__':
     init_db()

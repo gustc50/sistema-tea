@@ -58,6 +58,7 @@
         <button onclick="switchTab('prontuario')" id="nav-prontuario">📂 Prontuário</button>
         <button onclick="openAgenda()" id="nav-agenda">🗓️ Agenda</button>
         <button onclick="switchTab('profissionais')" id="nav-profissionais">🩺 Profissionais</button>
+        <button onclick="openFinanceiro()" id="nav-financeiro">💰 Financeiro</button>
         <button onclick="openConfiguracoes()" id="nav-configuracoes">⚙️ Configurações</button>
         <div style="margin-top:auto; font-size:0.75rem; color:#64748b; padding:10px;">v2.0 SQLite Local<br>Dados: prontuario_tea.db</div>
     </aside>
@@ -197,6 +198,46 @@
             </div>
         </div>
 
+        <!-- FINANCEIRO -->
+        <div id="tab-financeiro" class="tab-content">
+            <h1>Financeiro</h1>
+            <div class="card form-grid">
+                <div>
+                    <label>Mês</label>
+                    <select id="finMonth" onchange="loadFinanceiro()">
+                        <option value="1">Janeiro</option>
+                        <option value="2">Fevereiro</option>
+                        <option value="3">Março</option>
+                        <option value="4">Abril</option>
+                        <option value="5">Maio</option>
+                        <option value="6">Junho</option>
+                        <option value="7">Julho</option>
+                        <option value="8">Agosto</option>
+                        <option value="9">Setembro</option>
+                        <option value="10">Outubro</option>
+                        <option value="11">Novembro</option>
+                        <option value="12">Dezembro</option>
+                    </select>
+                </div>
+                <div><label>Ano</label><input type="number" id="finYear" onchange="loadFinanceiro()"></div>
+                <div><label>Data do Pagamento *</label><input type="date" id="finPaidDate"></div>
+            </div>
+            <div class="card">
+                <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:15px;margin-bottom:15px;">
+                    <label style="margin:0;">Atendimentos do Período</label>
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                        <button class="btn-primary" onclick="markAllPaid()">💰 Todos Pagos</button>
+                        <button class="btn-primary" onclick="exportFinanceiroPdf()">📄 Exportar</button>
+                    </div>
+                </div>
+                <div id="financeiroSummary" style="display:flex;gap:30px;flex-wrap:wrap;margin-bottom:20px;padding:15px;background:#f8fafc;border-radius:8px;font-size:0.9rem;color:#334155;"></div>
+                <table>
+                    <thead><tr><th>Paciente</th><th>Resp. Pagamento</th><th>Data</th><th>Horário</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+                    <tbody id="financeiroTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- CONFIGURAÇÕES -->
         <div id="tab-configuracoes" class="tab-content">
             <h1>Configurações</h1>
@@ -225,6 +266,7 @@
                     <div><label>Fechamento</label><input type="time" id="cfgCloseTime"></div>
                     <div><label>Tempo de Atendimento (min)</label><input type="number" id="cfgDuration" min="1"></div>
                     <div><label>Tempo de Troca / Descanso (min)</label><input type="number" id="cfgBuffer" min="0"></div>
+                    <div><label>Valor do Atendimento (R$)</label><input type="number" id="cfgSessionPrice" min="0" step="0.01"></div>
                     <div class="form-full"><button class="btn-primary" onclick="saveSettings()">💾 Salvar Configurações</button></div>
                 </div>
             </div>
@@ -516,6 +558,7 @@ async function refreshLists() {
     document.getElementById('cfgCloseTime').value = settings.clinic_close_time;
     document.getElementById('cfgDuration').value = settings.session_duration_minutes;
     document.getElementById('cfgBuffer').value = settings.buffer_minutes;
+    document.getElementById('cfgSessionPrice').value = settings.session_price ?? 0;
     document.getElementById('cfgClinicName').value = settings.clinic_name || '';
     document.getElementById('cfgClinicDocument').value = settings.clinic_document || '';
     document.getElementById('cfgStreet').value = settings.clinic_street || '';
@@ -593,11 +636,13 @@ async function saveSettings() {
     const clinic_close_time = document.getElementById('cfgCloseTime').value;
     const session_duration_minutes = Number(document.getElementById('cfgDuration').value);
     const buffer_minutes = Number(document.getElementById('cfgBuffer').value);
+    const session_price = Number(document.getElementById('cfgSessionPrice').value);
     if(!clinic_open_time || !clinic_close_time) return alert('Informe o horário de abertura e fechamento.');
     if(!session_duration_minutes || session_duration_minutes <= 0) return alert('Informe um tempo de atendimento válido.');
     if(isNaN(buffer_minutes) || buffer_minutes < 0) return alert('Informe um tempo de troca válido.');
+    if(isNaN(session_price) || session_price < 0) return alert('Informe um valor de atendimento válido.');
     const res = await api('/api/settings', 'POST', {
-        clinic_open_time, clinic_close_time, session_duration_minutes, buffer_minutes,
+        clinic_open_time, clinic_close_time, session_duration_minutes, buffer_minutes, session_price,
         clinic_name: document.getElementById('cfgClinicName').value.trim(),
         clinic_document: document.getElementById('cfgClinicDocument').value.trim(),
         clinic_logo: cfgClinicLogoDataUrl,
@@ -704,6 +749,144 @@ async function cancelAppointment(id) {
     await api(`/api/appointments/${id}`, 'DELETE');
     showStatus('✅ Agendamento cancelado.');
     loadAgenda();
+}
+
+let currentFinanceiro = [];
+let currentFinanceiroPrice = 0;
+
+function formatCurrency(v) {
+    return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+async function openFinanceiro() {
+    await switchTab('financeiro');
+    const monthSelect = document.getElementById('finMonth');
+    const yearInput = document.getElementById('finYear');
+    if (!monthSelect.value) monthSelect.value = String(new Date().getMonth() + 1);
+    if (!yearInput.value) yearInput.value = new Date().getFullYear();
+    loadFinanceiro();
+}
+
+async function loadFinanceiro() {
+    const month = document.getElementById('finMonth').value;
+    const year = document.getElementById('finYear').value;
+    const tbody = document.getElementById('financeiroTableBody');
+    const summary = document.getElementById('financeiroSummary');
+    if (!month || !year) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:30px;">Selecione o mês e o ano.</td></tr>';
+        summary.innerHTML = '';
+        return;
+    }
+
+    currentFinanceiro = await api(`/api/financeiro?year=${year}&month=${month}`);
+    const settings = await api('/api/settings');
+    currentFinanceiroPrice = Number(settings.session_price) || 0;
+
+    if (!currentFinanceiro.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:30px;">Nenhum atendimento nesse período.</td></tr>';
+        summary.innerHTML = '';
+        return;
+    }
+
+    tbody.innerHTML = currentFinanceiro.map(f => {
+        const isPaid = !!f.paid;
+        const payerLabel = f.payment_responsible === 'paciente' ? 'Paciente' : (f.payment_responsible === 'responsavel' ? 'Responsável' : '-');
+        const paidDateHtml = isPaid && f.paid_date
+            ? `<div style="font-size:0.75rem;color:#94a3b8;margin-top:4px;">em ${new Date(f.paid_date+'T00:00:00').toLocaleDateString('pt-BR')}</div>`
+            : '';
+        return `<tr>
+            <td><strong>${escapeHtml(f.patient_name)}</strong></td>
+            <td>${escapeHtml(payerLabel)}</td>
+            <td>${new Date(f.date+'T00:00:00').toLocaleDateString('pt-BR')}</td>
+            <td>${escapeHtml(f.start_time)}</td>
+            <td>${formatCurrency(currentFinanceiroPrice)}</td>
+            <td><span class="badge ${isPaid ? 'badge-low' : 'badge-high'}">${isPaid ? 'Baixado' : 'Não baixado'}</span>${paidDateHtml}</td>
+            <td>${isPaid ? '' : `<button class="btn-primary" style="padding:6px 14px;font-size:0.8rem;" onclick="markPaid(${f.id})">✅ Pago</button>`}</td>
+        </tr>`;
+    }).join('');
+
+    const total = currentFinanceiro.length * currentFinanceiroPrice;
+    const paidCount = currentFinanceiro.filter(f => f.paid).length;
+    const paidTotal = paidCount * currentFinanceiroPrice;
+    const pendingTotal = total - paidTotal;
+    summary.innerHTML = `
+        <div>${currentFinanceiro.length} atendimento(s) — Total: <strong>${formatCurrency(total)}</strong></div>
+        <div style="color:#166534;">Baixado: <strong>${formatCurrency(paidTotal)}</strong> (${paidCount})</div>
+        <div style="color:#991b1b;">Não baixado: <strong>${formatCurrency(pendingTotal)}</strong> (${currentFinanceiro.length - paidCount})</div>
+    `;
+}
+
+async function markPaid(id) {
+    const paidDate = document.getElementById('finPaidDate').value;
+    if (!paidDate) return alert('Informe a "Data do Pagamento" antes de dar baixa.');
+    const res = await api(`/api/appointments/${id}/pay`, 'POST', { paid_date: paidDate });
+    if (res.error) return showStatus('❌ ' + res.error, true);
+    showStatus('✅ Pagamento registrado!');
+    loadFinanceiro();
+}
+
+async function markAllPaid() {
+    const paidDate = document.getElementById('finPaidDate').value;
+    if (!paidDate) return alert('Informe a "Data do Pagamento" antes de dar baixa.');
+    const month = document.getElementById('finMonth').value;
+    const year = document.getElementById('finYear').value;
+    if (!month || !year) return alert('Selecione o mês e o ano.');
+    if (!currentFinanceiro.some(f => !f.paid)) return alert('Não há atendimentos pendentes nesse período.');
+    if (!confirm('Marcar todos os atendimentos não baixados deste mês como pagos?')) return;
+    const res = await api('/api/appointments/pay-all', 'POST', { year, month, paid_date: paidDate });
+    if (res.error) return showStatus('❌ ' + res.error, true);
+    showStatus(`✅ ${res.updated} atendimento(s) marcados como pagos!`);
+    loadFinanceiro();
+}
+
+function exportFinanceiroPdf() {
+    if (!currentFinanceiro.length) return alert('Nenhum atendimento para exportar neste período.');
+    const monthLabel = document.getElementById('finMonth').selectedOptions[0].text;
+    const year = document.getElementById('finYear').value;
+
+    const rowsHtml = currentFinanceiro.map(f => {
+        const isPaid = !!f.paid;
+        const payerLabel = f.payment_responsible === 'paciente' ? 'Paciente' : (f.payment_responsible === 'responsavel' ? 'Responsável' : '-');
+        const paidDate = isPaid && f.paid_date ? new Date(f.paid_date+'T00:00:00').toLocaleDateString('pt-BR') : '-';
+        return `<tr>
+            <td>${escapeHtml(f.patient_name)}</td>
+            <td>${escapeHtml(payerLabel)}</td>
+            <td>${new Date(f.date+'T00:00:00').toLocaleDateString('pt-BR')}</td>
+            <td>${escapeHtml(f.start_time)}</td>
+            <td>${formatCurrency(currentFinanceiroPrice)}</td>
+            <td>${isPaid ? 'Baixado' : 'Não baixado'}</td>
+            <td>${paidDate}</td>
+        </tr>`;
+    }).join('');
+
+    const total = currentFinanceiro.length * currentFinanceiroPrice;
+    const paidCount = currentFinanceiro.filter(f => f.paid).length;
+    const paidTotal = paidCount * currentFinanceiroPrice;
+    const pendingTotal = total - paidTotal;
+
+    const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Financeiro - ${escapeHtml(monthLabel)}/${escapeHtml(year)}</title>
+        <style>
+            body{font-family:'Segoe UI',system-ui,sans-serif;color:#334155;padding:40px;}
+            h1{font-size:1.4rem;border-bottom:2px solid #e2e8f0;padding-bottom:10px;margin-bottom:15px;}
+            table{width:100%;border-collapse:collapse;margin-top:15px;}
+            th{text-align:left;padding:8px;background:#f8fafc;font-size:0.75rem;color:#64748b;text-transform:uppercase;border-bottom:2px solid #e2e8f0;}
+            td{padding:8px;border-bottom:1px solid #f1f5f9;font-size:0.85rem;}
+            .summary{color:#64748b;margin-bottom:5px;font-size:0.9rem;}
+        </style></head>
+        <body>
+            <h1>Financeiro — ${escapeHtml(monthLabel)}/${escapeHtml(year)}</h1>
+            <p class="summary">Total do período: <strong>${formatCurrency(total)}</strong> — Baixado: ${formatCurrency(paidTotal)} (${paidCount}) — Não baixado: ${formatCurrency(pendingTotal)} (${currentFinanceiro.length - paidCount})</p>
+            <p class="summary">Emitido em ${new Date().toLocaleString('pt-BR')}</p>
+            <table>
+                <thead><tr><th>Paciente</th><th>Resp. Pagamento</th><th>Data</th><th>Horário</th><th>Valor</th><th>Status</th><th>Data Pagamento</th></tr></thead>
+                <tbody>${rowsHtml}</tbody>
+            </table>
+        </body></html>`;
+    const win = window.open('', '_blank');
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 300);
 }
 
 function renderPatientsTable(filter='') {
