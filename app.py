@@ -99,6 +99,57 @@ def init_db():
             FOREIGN KEY (patient_id) REFERENCES patients(id),
             FOREIGN KEY (professional_id) REFERENCES professionals(id)
         );
+        CREATE TABLE IF NOT EXISTS data_sheets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient_id INTEGER NOT NULL,
+            date TEXT NOT NULL,
+            title TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (patient_id) REFERENCES patients(id)
+        );
+        CREATE TABLE IF NOT EXISTS data_sheet_components (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sheet_id INTEGER NOT NULL,
+            activity TEXT NOT NULL,
+            attempts INTEGER,
+            trial_duration_minutes REAL,
+            observation TEXT,
+            FOREIGN KEY (sheet_id) REFERENCES data_sheets(id)
+        );
+        CREATE TABLE IF NOT EXISTS probe_tracking (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient_id INTEGER NOT NULL,
+            date TEXT NOT NULL,
+            skill TEXT NOT NULL,
+            description TEXT,
+            probe_type TEXT,
+            result TEXT,
+            observation TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (patient_id) REFERENCES patients(id)
+        );
+        CREATE TABLE IF NOT EXISTS scatterplot_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient_id INTEGER NOT NULL,
+            date TEXT NOT NULL,
+            shift TEXT,
+            time TEXT,
+            behavior TEXT NOT NULL,
+            intensity TEXT,
+            observation TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (patient_id) REFERENCES patients(id)
+        );
+        CREATE TABLE IF NOT EXISTS behavior_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient_id INTEGER NOT NULL,
+            target_behavior TEXT NOT NULL,
+            reduction_plan TEXT,
+            replacement_skill TEXT NOT NULL,
+            replacement_skill_description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (patient_id) REFERENCES patients(id)
+        );
     ''')
     conn.commit()
     conn.execute('INSERT OR IGNORE INTO settings (id) VALUES (1)')
@@ -470,6 +521,132 @@ def delete_appointment(appointment_id):
     conn.commit()
     conn.close()
     return jsonify({'status': 'ok'})
+
+# --- ATENDIMENTO CLÍNICO ---
+
+@app.route('/api/data-sheets/<int:patient_id>', methods=['GET'])
+def get_data_sheets(patient_id):
+    conn = get_db()
+    sheets = conn.execute(
+        'SELECT * FROM data_sheets WHERE patient_id = ? ORDER BY date DESC, id DESC', (patient_id,)
+    ).fetchall()
+    result = []
+    for sheet in sheets:
+        components = conn.execute(
+            'SELECT * FROM data_sheet_components WHERE sheet_id = ? ORDER BY id', (sheet['id'],)
+        ).fetchall()
+        row = dict(sheet)
+        row['components'] = [dict(c) for c in components]
+        result.append(row)
+    conn.close()
+    return jsonify(result)
+
+@app.route('/api/data-sheets', methods=['POST'])
+def add_data_sheet():
+    data = request.json
+    patient_id = data.get('patient_id')
+    date = (data.get('date') or '').strip()
+    title = data.get('title')
+    components = data.get('components') or []
+    if not patient_id or not date or not components:
+        return jsonify({'error': 'patient_id, date e ao menos um componente são obrigatórios'}), 400
+    for c in components:
+        if not (c.get('activity') or '').strip():
+            return jsonify({'error': 'Todo componente precisa de uma atividade'}), 400
+    conn = get_db()
+    cursor = conn.execute(
+        'INSERT INTO data_sheets (patient_id, date, title) VALUES (?, ?, ?)',
+        (patient_id, date, title)
+    )
+    sheet_id = cursor.lastrowid
+    conn.executemany(
+        'INSERT INTO data_sheet_components (sheet_id, activity, attempts, trial_duration_minutes, observation) VALUES (?, ?, ?, ?, ?)',
+        [(sheet_id, c.get('activity'), c.get('attempts'), c.get('trial_duration_minutes'), c.get('observation')) for c in components]
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({'id': sheet_id, 'status': 'ok'}), 201
+
+@app.route('/api/probe-tracking/<int:patient_id>', methods=['GET'])
+def get_probe_tracking(patient_id):
+    conn = get_db()
+    rows = conn.execute(
+        'SELECT * FROM probe_tracking WHERE patient_id = ? ORDER BY date DESC, id DESC', (patient_id,)
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+@app.route('/api/probe-tracking', methods=['POST'])
+def add_probe_tracking():
+    data = request.json
+    patient_id = data.get('patient_id')
+    date = (data.get('date') or '').strip()
+    skill = (data.get('skill') or '').strip()
+    if not patient_id or not date or not skill:
+        return jsonify({'error': 'patient_id, date e skill são obrigatórios'}), 400
+    conn = get_db()
+    cursor = conn.execute(
+        'INSERT INTO probe_tracking (patient_id, date, skill, description, probe_type, result, observation) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        (patient_id, date, skill, data.get('description'), data.get('probe_type'), data.get('result'), data.get('observation'))
+    )
+    conn.commit()
+    new_id = cursor.lastrowid
+    conn.close()
+    return jsonify({'id': new_id, 'status': 'ok'}), 201
+
+@app.route('/api/scatterplot/<int:patient_id>', methods=['GET'])
+def get_scatterplot(patient_id):
+    conn = get_db()
+    rows = conn.execute(
+        'SELECT * FROM scatterplot_entries WHERE patient_id = ? ORDER BY date DESC, time DESC, id DESC', (patient_id,)
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+@app.route('/api/scatterplot', methods=['POST'])
+def add_scatterplot():
+    data = request.json
+    patient_id = data.get('patient_id')
+    date = (data.get('date') or '').strip()
+    behavior = (data.get('behavior') or '').strip()
+    if not patient_id or not date or not behavior:
+        return jsonify({'error': 'patient_id, date e behavior são obrigatórios'}), 400
+    conn = get_db()
+    cursor = conn.execute(
+        'INSERT INTO scatterplot_entries (patient_id, date, shift, time, behavior, intensity, observation) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        (patient_id, date, data.get('shift'), data.get('time'), behavior, data.get('intensity'), data.get('observation'))
+    )
+    conn.commit()
+    new_id = cursor.lastrowid
+    conn.close()
+    return jsonify({'id': new_id, 'status': 'ok'}), 201
+
+@app.route('/api/behavior-links/<int:patient_id>', methods=['GET'])
+def get_behavior_links(patient_id):
+    conn = get_db()
+    rows = conn.execute(
+        'SELECT * FROM behavior_links WHERE patient_id = ? ORDER BY created_at DESC, id DESC', (patient_id,)
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+@app.route('/api/behavior-links', methods=['POST'])
+def add_behavior_link():
+    data = request.json
+    patient_id = data.get('patient_id')
+    target_behavior = (data.get('target_behavior') or '').strip()
+    replacement_skill = (data.get('replacement_skill') or '').strip()
+    if not patient_id or not target_behavior or not replacement_skill:
+        return jsonify({'error': 'patient_id, target_behavior e replacement_skill são obrigatórios'}), 400
+    conn = get_db()
+    cursor = conn.execute(
+        'INSERT INTO behavior_links (patient_id, target_behavior, reduction_plan, replacement_skill, replacement_skill_description) VALUES (?, ?, ?, ?, ?)',
+        (patient_id, target_behavior, data.get('reduction_plan'), replacement_skill, data.get('replacement_skill_description'))
+    )
+    conn.commit()
+    new_id = cursor.lastrowid
+    conn.close()
+    return jsonify({'id': new_id, 'status': 'ok'}), 201
 
 @app.route('/api/financeiro', methods=['GET'])
 def get_financeiro():

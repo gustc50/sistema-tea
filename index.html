@@ -40,6 +40,20 @@
         .search-box span { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #94a3b8; }
         tr.patient-row { cursor: pointer; }
         .row-action { color: var(--primary); font-weight: 600; font-size: 0.85rem; white-space: nowrap; }
+        .subnav { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+        .subnav button { background: #f1f5f9; border: none; color: #475569; padding: 10px 16px; border-radius: 8px; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: all 0.2s; }
+        .subnav button:hover { background: #e2e8f0; }
+        .subnav button.active { background: var(--primary); color: white; }
+        .clinico-sub { display: none; }
+        .clinico-sub.active { display: block; animation: fadeIn 0.3s ease; }
+        .stat-tile { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; padding: 18px 20px; flex: 1; min-width: 160px; }
+        .stat-tile .stat-value { font-size: 1.8rem; font-weight: 800; color: var(--primary); line-height: 1; }
+        .stat-tile .stat-label { font-size: 0.8rem; color: #64748b; margin-top: 6px; }
+        .bar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+        .bar-row .bar-label { width: 130px; flex-shrink: 0; font-size: 0.85rem; color: #334155; }
+        .bar-row .bar-track { flex: 1; background: #f1f5f9; border-radius: 4px; height: 20px; overflow: hidden; }
+        .bar-row .bar-fill { background: var(--primary); height: 20px; border-radius: 0 4px 4px 0; }
+        .bar-row .bar-value { width: 32px; flex-shrink: 0; text-align: right; font-size: 0.85rem; font-weight: 700; color: #334155; }
         .print-only { display: none; }
         @media print {
             body { background: white; height: auto; overflow: visible; }
@@ -55,6 +69,7 @@
         <h2>🧩 Gestão TEA</h2>
         <button onclick="switchTab('cadastro')" class="active" id="nav-cadastro">👤 Cadastro</button>
         <button onclick="switchTab('testes')" id="nav-testes">📋 Aplicar Testes</button>
+        <button onclick="openAtendimentoClinico()" id="nav-atendimento">🧠 Atendimento Clínico</button>
         <button onclick="switchTab('prontuario')" id="nav-prontuario">📂 Prontuário</button>
         <button onclick="openAgenda()" id="nav-agenda">🗓️ Agenda</button>
         <button onclick="switchTab('profissionais')" id="nav-profissionais">🩺 Profissionais</button>
@@ -114,6 +129,150 @@
                 <div><label>Protocolo</label><select id="testType" onchange="renderTestForm()"><option value="">Selecione...</option><option value="aq10">AQ-10 (Adultos)</option><option value="aq50">AQ-50 (Adultos)</option><option value="mchat">M-CHAT-R/F (Crianças)</option></select></div>
             </div>
             <form id="dynamicTestForm" class="card" style="display:none;"></form>
+        </div>
+
+        <!-- ATENDIMENTO CLÍNICO -->
+        <div id="tab-atendimento" class="tab-content">
+            <h1>Atendimento Clínico</h1>
+            <div class="card no-print"><label>Paciente</label><select id="clinicoPatientSelect" onchange="loadAtendimentoClinico()"><option value="">-- Escolha --</option></select></div>
+            <div id="clinicoContent" style="display:none;">
+                <div class="subnav">
+                    <button onclick="switchClinicoSubTab('coleta')" class="active" id="subnav-coleta">📝 Coleta de Dados</button>
+                    <button onclick="switchClinicoSubTab('sondagem')" id="subnav-sondagem">🔍 Rastreamento de Sondagem</button>
+                    <button onclick="switchClinicoSubTab('dispersao')" id="subnav-dispersao">📊 Análise de Dispersão</button>
+                    <button onclick="switchClinicoSubTab('vinculacao')" id="subnav-vinculacao">🔗 Vinculação de Comportamentos</button>
+                    <button onclick="switchClinicoSubTab('dashboard')" id="subnav-dashboard">📈 Dashboard</button>
+                </div>
+
+                <!-- COLETA DE DADOS -->
+                <div id="clinico-coleta" class="clinico-sub active">
+                    <div class="card">
+                        <label>Nova Folha de Dados</label>
+                        <div class="form-grid" style="margin-top:15px;">
+                            <div><label>Data do Atendimento</label><input type="date" id="dsDate"></div>
+                            <div><label>Título da Folha (opcional)</label><input type="text" id="dsTitle" placeholder="Ex: Sessão de linguagem"></div>
+                        </div>
+                        <div id="dsComponents" style="margin-top:20px;"></div>
+                        <button type="button" class="btn-primary" style="background:#475569;" onclick="addDataSheetComponentRow()">+ Adicionar Componente</button>
+                        <div style="margin-top:20px;display:flex;justify-content:flex-end;">
+                            <button class="btn-primary" onclick="saveDataSheet()">💾 Salvar Folha de Dados</button>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <label>Histórico de Folhas de Dados</label>
+                        <div id="dsHistory" style="margin-top:15px;"></div>
+                    </div>
+                </div>
+
+                <!-- RASTREAMENTO DE SONDAGEM -->
+                <div id="clinico-sondagem" class="clinico-sub">
+                    <div class="card" style="border-left: 4px solid #a855f7;">
+                        <label>Novo Registro de Sondagem (Generalização / Manutenção)</label>
+                        <p style="font-size:0.8rem;color:#94a3b8;margin:8px 0 5px;">Use este bloco para dados de generalização e manutenção, separados do ensino direto (Coleta de Dados). Ex: "Aplicar 1x por semana em ambiente diferente".</p>
+                        <div class="form-grid" style="margin-top:15px;">
+                            <div><label>Data</label><input type="date" id="ptDate"></div>
+                            <div>
+                                <label>Tipo</label>
+                                <select id="ptType">
+                                    <option value="generalizacao">Generalização</option>
+                                    <option value="manutencao">Manutenção</option>
+                                </select>
+                            </div>
+                            <div class="form-full"><label>Habilidade / Programa</label><input type="text" id="ptSkill"></div>
+                            <div class="form-full"><label>Descrição do Rastreamento</label><input type="text" id="ptDescription" placeholder='Ex: "Aplicar 1x por semana em ambiente diferente"'></div>
+                            <div>
+                                <label>Resultado</label>
+                                <select id="ptResult">
+                                    <option value="">Selecione...</option>
+                                    <option value="atingiu">Atingiu</option>
+                                    <option value="parcial">Parcial</option>
+                                    <option value="nao_atingiu">Não Atingiu</option>
+                                </select>
+                            </div>
+                            <div class="form-full"><label>Observação</label><input type="text" id="ptObservation"></div>
+                            <div class="form-full"><button class="btn-primary" onclick="saveProbeTracking()">💾 Salvar Registro de Sondagem</button></div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <label>Histórico de Sondagens</label>
+                        <div id="ptHistory" style="margin-top:15px;"></div>
+                    </div>
+                </div>
+
+                <!-- ANÁLISE DE DISPERSÃO -->
+                <div id="clinico-dispersao" class="clinico-sub">
+                    <div class="card">
+                        <label>Novo Registro de Comportamento</label>
+                        <div class="form-grid" style="margin-top:15px;">
+                            <div><label>Data</label><input type="date" id="spDate"></div>
+                            <div>
+                                <label>Turno</label>
+                                <select id="spShift">
+                                    <option value="manha">Manhã</option>
+                                    <option value="tarde">Tarde</option>
+                                    <option value="noite">Noite</option>
+                                </select>
+                            </div>
+                            <div><label>Horário Aproximado</label><input type="time" id="spTime"></div>
+                            <div>
+                                <label>Intensidade</label>
+                                <select id="spIntensity">
+                                    <option value="leve">Leve</option>
+                                    <option value="moderada">Moderada</option>
+                                    <option value="grave">Grave</option>
+                                </select>
+                            </div>
+                            <div class="form-full"><label>Comportamento</label><input type="text" id="spBehavior"></div>
+                            <div class="form-full"><label>Observações</label><input type="text" id="spObservation"></div>
+                            <div class="form-full"><button class="btn-primary" onclick="saveScatterplot()">💾 Salvar Registro</button></div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <label>Histórico de Ocorrências</label>
+                        <div id="spHistory" style="margin-top:15px;"></div>
+                    </div>
+                </div>
+
+                <!-- VINCULAÇÃO DE COMPORTAMENTOS -->
+                <div id="clinico-vinculacao" class="clinico-sub">
+                    <div class="card">
+                        <label>Novo Vínculo</label>
+                        <div class="form-grid" style="margin-top:15px;">
+                            <div class="form-full"><label>Comportamento-Alvo (Problema)</label><input type="text" id="blTargetBehavior"></div>
+                            <div class="form-full"><label>Plano de Redução de Comportamento Problema</label><textarea id="blReductionPlan" rows="3"></textarea></div>
+                            <div class="form-full"><label>Habilidade Substitutiva Vinculada</label><input type="text" id="blReplacementSkill"></div>
+                            <div class="form-full"><label>Descrição / Estratégia de Ensino da Habilidade Substitutiva</label><textarea id="blReplacementDescription" rows="3"></textarea></div>
+                            <div class="form-full"><button class="btn-primary" onclick="saveBehaviorLink()">💾 Salvar Vínculo</button></div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <label>Vínculos Registrados</label>
+                        <div id="blHistory" style="margin-top:15px;"></div>
+                    </div>
+                </div>
+
+                <!-- DASHBOARD -->
+                <div id="clinico-dashboard" class="clinico-sub">
+                    <div class="card form-grid">
+                        <div><label>De</label><input type="date" id="dashFrom" onchange="loadClinicoDashboard()"></div>
+                        <div><label>Até</label><input type="date" id="dashTo" onchange="loadClinicoDashboard()"></div>
+                    </div>
+                    <div class="card">
+                        <div style="display:flex;gap:15px;flex-wrap:wrap;margin-bottom:25px;">
+                            <div class="stat-tile"><div class="stat-value" id="dashSheetsCount">0</div><div class="stat-label">Folhas de Coleta de Dados</div></div>
+                            <div class="stat-tile"><div class="stat-value" id="dashProbeCount">0</div><div class="stat-label">Registros de Sondagem</div></div>
+                            <div class="stat-tile"><div class="stat-value" id="dashScatterCount">0</div><div class="stat-label">Ocorrências (Dispersão)</div></div>
+                            <div class="stat-tile"><div class="stat-value" id="dashLinksCount">0</div><div class="stat-label">Vínculos de Comportamento (total ativo)</div></div>
+                        </div>
+                        <label>Ocorrências de Comportamento por Turno</label>
+                        <div id="dashShiftChart" style="margin-top:15px;"></div>
+                    </div>
+                    <div class="card">
+                        <label>Resultados de Sondagem no Período</label>
+                        <div id="dashProbeChart" style="margin-top:15px;"></div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- PRONTUÁRIO -->
@@ -504,6 +663,13 @@ function todayLocalDateString() {
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 }
 
+function dateOffsetString(daysAgo) {
+    const d = new Date();
+    d.setDate(d.getDate() - daysAgo);
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+
 function timeToMinutes(t) {
     const [h, m] = t.split(':').map(Number);
     return h * 60 + m;
@@ -555,6 +721,7 @@ async function refreshLists() {
     const opts = patients.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
     document.getElementById('testPatientSelect').innerHTML = '<option value="">Selecione...</option>' + opts;
     document.getElementById('prontPatientSelect').innerHTML = '<option value="">-- Escolha --</option>' + opts;
+    document.getElementById('clinicoPatientSelect').innerHTML = '<option value="">-- Escolha --</option>' + opts;
 
     const finPatientSelect = document.getElementById('finPatientSelect');
     const prevFinPatient = finPatientSelect.value;
@@ -1198,6 +1365,369 @@ function generatePeriodPdf() {
     win.document.close();
     win.focus();
     setTimeout(() => win.print(), 300);
+}
+
+// --- ATENDIMENTO CLÍNICO ---
+
+let dataSheetComponents = [];
+
+async function openAtendimentoClinico() {
+    await switchTab('atendimento');
+    if (document.getElementById('clinicoPatientSelect').value) loadAtendimentoClinico();
+}
+
+function switchClinicoSubTab(sub) {
+    document.querySelectorAll('.clinico-sub').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.subnav button').forEach(b => b.classList.remove('active'));
+    document.getElementById(`clinico-${sub}`).classList.add('active');
+    document.getElementById(`subnav-${sub}`).classList.add('active');
+}
+
+async function loadAtendimentoClinico() {
+    const pid = document.getElementById('clinicoPatientSelect').value;
+    const content = document.getElementById('clinicoContent');
+    if (!pid) { content.style.display = 'none'; return; }
+    content.style.display = 'block';
+
+    document.getElementById('dsDate').value = todayLocalDateString();
+    document.getElementById('dsTitle').value = '';
+    dataSheetComponents = [];
+    renderDataSheetComponents();
+
+    document.getElementById('ptDate').value = todayLocalDateString();
+    document.getElementById('ptSkill').value = '';
+    document.getElementById('ptDescription').value = '';
+    document.getElementById('ptResult').value = '';
+    document.getElementById('ptObservation').value = '';
+
+    document.getElementById('spDate').value = todayLocalDateString();
+    document.getElementById('spBehavior').value = '';
+    document.getElementById('spTime').value = '';
+    document.getElementById('spObservation').value = '';
+
+    document.getElementById('blTargetBehavior').value = '';
+    document.getElementById('blReductionPlan').value = '';
+    document.getElementById('blReplacementSkill').value = '';
+    document.getElementById('blReplacementDescription').value = '';
+
+    if (!document.getElementById('dashFrom').value) document.getElementById('dashFrom').value = dateOffsetString(30);
+    if (!document.getElementById('dashTo').value) document.getElementById('dashTo').value = todayLocalDateString();
+
+    await Promise.all([
+        loadDataSheetsHistory(pid),
+        loadProbeTrackingHistory(pid),
+        loadScatterplotHistory(pid),
+        loadBehaviorLinksHistory(pid)
+    ]);
+    loadClinicoDashboard();
+}
+
+// -- Coleta de Dados --
+
+function addDataSheetComponentRow() {
+    dataSheetComponents.push({ activity: '', attempts: '', trial_duration_minutes: '', observation: '' });
+    renderDataSheetComponents();
+}
+
+function removeDataSheetComponentRow(index) {
+    dataSheetComponents.splice(index, 1);
+    renderDataSheetComponents();
+}
+
+function updateDataSheetComponent(index, field, value) {
+    dataSheetComponents[index][field] = value;
+}
+
+function renderDataSheetComponents() {
+    const container = document.getElementById('dsComponents');
+    if (!dataSheetComponents.length) {
+        container.innerHTML = '<p style="color:#94a3b8;font-size:0.85rem;padding:10px 0;">Nenhum componente adicionado ainda. Use o botão abaixo para adicionar.</p>';
+        return;
+    }
+    container.innerHTML = dataSheetComponents.map((c, i) => `
+        <div style="padding:15px;background:#f8fafc;border-radius:8px;margin-bottom:12px;position:relative;">
+            <button type="button" onclick="removeDataSheetComponentRow(${i})" title="Remover componente" style="position:absolute;top:10px;right:10px;background:none;border:none;color:#991b1b;cursor:pointer;font-size:1rem;line-height:1;">✕</button>
+            <div class="form-grid">
+                <div class="form-full"><label>Atividade</label><input type="text" value="${escapeHtml(c.activity)}" oninput="updateDataSheetComponent(${i},'activity',this.value)"></div>
+                <div><label>Número de Tentativas</label><input type="number" min="0" value="${escapeHtml(c.attempts)}" oninput="updateDataSheetComponent(${i},'attempts',this.value)"></div>
+                <div><label>Duração das Tentativas (min)</label><input type="number" min="0" step="0.5" value="${escapeHtml(c.trial_duration_minutes)}" oninput="updateDataSheetComponent(${i},'trial_duration_minutes',this.value)"></div>
+                <div class="form-full"><label>Observação</label><input type="text" value="${escapeHtml(c.observation)}" oninput="updateDataSheetComponent(${i},'observation',this.value)"></div>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function saveDataSheet() {
+    const pid = document.getElementById('clinicoPatientSelect').value;
+    if (!pid) return;
+    const date = document.getElementById('dsDate').value;
+    const title = document.getElementById('dsTitle').value.trim();
+    if (!date) return alert('Informe a data do atendimento.');
+    if (!dataSheetComponents.length) return alert('Adicione ao menos um componente.');
+    const components = dataSheetComponents.map(c => ({
+        activity: (c.activity || '').trim(),
+        attempts: c.attempts === '' ? null : Number(c.attempts),
+        trial_duration_minutes: c.trial_duration_minutes === '' ? null : Number(c.trial_duration_minutes),
+        observation: (c.observation || '').trim()
+    }));
+    if (components.some(c => !c.activity)) return alert('Toda atividade precisa de um nome.');
+    const res = await api('/api/data-sheets', 'POST', { patient_id: Number(pid), date, title, components });
+    if (res.error) return showStatus('❌ ' + res.error, true);
+    showStatus('✅ Folha de dados salva!');
+    document.getElementById('dsTitle').value = '';
+    dataSheetComponents = [];
+    renderDataSheetComponents();
+    loadDataSheetsHistory(pid);
+}
+
+async function loadDataSheetsHistory(pid) {
+    const sheets = await api(`/api/data-sheets/${pid}`);
+    const container = document.getElementById('dsHistory');
+    if (!sheets.length) {
+        container.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px 0;">Nenhuma folha de dados registrada.</p>';
+        return;
+    }
+    container.innerHTML = sheets.map(s => `
+        <div style="padding:16px 0;border-bottom:1px solid #f1f5f9;">
+            <div style="font-weight:700;color:var(--primary);font-size:0.9rem;margin-bottom:8px;">${new Date(s.date+'T00:00:00').toLocaleDateString('pt-BR')}${s.title ? ' — ' + escapeHtml(s.title) : ''}</div>
+            <table style="margin-top:0;">
+                <thead><tr><th>Atividade</th><th>Tentativas</th><th>Duração (min)</th><th>Observação</th></tr></thead>
+                <tbody>
+                    ${s.components.map(c => `<tr><td>${escapeHtml(c.activity)}</td><td>${c.attempts ?? '-'}</td><td>${c.trial_duration_minutes ?? '-'}</td><td style="font-size:0.85rem;color:#64748b;">${escapeHtml(c.observation)||'-'}</td></tr>`).join('')}
+                </tbody>
+            </table>
+        </div>
+    `).join('');
+}
+
+// -- Rastreamento de Sondagem --
+
+function probeResultLabel(result) {
+    return { atingiu: 'Atingiu', parcial: 'Parcial', nao_atingiu: 'Não Atingiu' }[result] || '';
+}
+
+function probeResultBadgeClass(result) {
+    if (result === 'atingiu') return 'badge-low';
+    if (result === 'nao_atingiu') return 'badge-high';
+    return '';
+}
+
+async function saveProbeTracking() {
+    const pid = document.getElementById('clinicoPatientSelect').value;
+    if (!pid) return;
+    const date = document.getElementById('ptDate').value;
+    const skill = document.getElementById('ptSkill').value.trim();
+    if (!date) return alert('Informe a data.');
+    if (!skill) return alert('Informe a habilidade/programa.');
+    const payload = {
+        patient_id: Number(pid), date, skill,
+        description: document.getElementById('ptDescription').value.trim(),
+        probe_type: document.getElementById('ptType').value,
+        result: document.getElementById('ptResult').value,
+        observation: document.getElementById('ptObservation').value.trim()
+    };
+    const res = await api('/api/probe-tracking', 'POST', payload);
+    if (res.error) return showStatus('❌ ' + res.error, true);
+    showStatus('✅ Registro de sondagem salvo!');
+    document.getElementById('ptSkill').value = '';
+    document.getElementById('ptDescription').value = '';
+    document.getElementById('ptResult').value = '';
+    document.getElementById('ptObservation').value = '';
+    loadProbeTrackingHistory(pid);
+}
+
+async function loadProbeTrackingHistory(pid) {
+    const rows = await api(`/api/probe-tracking/${pid}`);
+    const container = document.getElementById('ptHistory');
+    if (!rows.length) {
+        container.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px 0;">Nenhum registro de sondagem.</p>';
+        return;
+    }
+    container.innerHTML = rows.map(r => `
+        <div style="padding:16px 0;border-bottom:1px solid #f1f5f9;">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
+                <div style="font-weight:700;color:var(--primary);font-size:0.9rem;">${new Date(r.date+'T00:00:00').toLocaleDateString('pt-BR')} — ${escapeHtml(r.skill)}</div>
+                <div style="display:flex;gap:8px;">
+                    <span class="badge" style="background:#f3e8ff;color:#7e22ce;">${r.probe_type === 'manutencao' ? 'Manutenção' : 'Generalização'}</span>
+                    ${r.result ? `<span class="badge ${probeResultBadgeClass(r.result)}">${probeResultLabel(r.result)}</span>` : ''}
+                </div>
+            </div>
+            ${r.description ? `<div style="font-size:0.85rem;color:#334155;margin-bottom:4px;">${escapeHtml(r.description)}</div>` : ''}
+            ${r.observation ? `<div style="font-size:0.85rem;color:#64748b;">${escapeHtml(r.observation)}</div>` : ''}
+        </div>
+    `).join('');
+}
+
+// -- Análise de Dispersão --
+
+function shiftLabel(shift) {
+    return { manha: 'Manhã', tarde: 'Tarde', noite: 'Noite' }[shift] || '-';
+}
+
+function intensityLabel(intensity) {
+    return { leve: 'Leve', moderada: 'Moderada', grave: 'Grave' }[intensity] || '';
+}
+
+function intensityBadgeClass(intensity) {
+    if (intensity === 'grave') return 'badge-high';
+    if (intensity === 'leve') return 'badge-low';
+    return '';
+}
+
+async function saveScatterplot() {
+    const pid = document.getElementById('clinicoPatientSelect').value;
+    if (!pid) return;
+    const date = document.getElementById('spDate').value;
+    const behavior = document.getElementById('spBehavior').value.trim();
+    if (!date) return alert('Informe a data.');
+    if (!behavior) return alert('Informe o comportamento observado.');
+    const payload = {
+        patient_id: Number(pid), date, behavior,
+        shift: document.getElementById('spShift').value,
+        time: document.getElementById('spTime').value,
+        intensity: document.getElementById('spIntensity').value,
+        observation: document.getElementById('spObservation').value.trim()
+    };
+    const res = await api('/api/scatterplot', 'POST', payload);
+    if (res.error) return showStatus('❌ ' + res.error, true);
+    showStatus('✅ Registro de comportamento salvo!');
+    document.getElementById('spBehavior').value = '';
+    document.getElementById('spTime').value = '';
+    document.getElementById('spObservation').value = '';
+    loadScatterplotHistory(pid);
+}
+
+async function loadScatterplotHistory(pid) {
+    const rows = await api(`/api/scatterplot/${pid}`);
+    const container = document.getElementById('spHistory');
+    if (!rows.length) {
+        container.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px 0;">Nenhuma ocorrência registrada.</p>';
+        return;
+    }
+    container.innerHTML = rows.map(r => `
+        <div style="padding:16px 0;border-bottom:1px solid #f1f5f9;">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px;">
+                <div style="font-weight:700;color:var(--primary);font-size:0.9rem;">${new Date(r.date+'T00:00:00').toLocaleDateString('pt-BR')}${r.time ? ' às ' + escapeHtml(r.time) : ''} — ${shiftLabel(r.shift)}</div>
+                ${r.intensity ? `<span class="badge ${intensityBadgeClass(r.intensity)}">${intensityLabel(r.intensity)}</span>` : ''}
+            </div>
+            <div style="font-size:0.9rem;color:#334155;margin-bottom:4px;"><strong>${escapeHtml(r.behavior)}</strong></div>
+            ${r.observation ? `<div style="font-size:0.85rem;color:#64748b;">${escapeHtml(r.observation)}</div>` : ''}
+        </div>
+    `).join('');
+}
+
+// -- Vinculação de Comportamentos --
+
+async function saveBehaviorLink() {
+    const pid = document.getElementById('clinicoPatientSelect').value;
+    if (!pid) return;
+    const targetBehavior = document.getElementById('blTargetBehavior').value.trim();
+    const replacementSkill = document.getElementById('blReplacementSkill').value.trim();
+    if (!targetBehavior) return alert('Informe o comportamento-alvo.');
+    if (!replacementSkill) return alert('Informe a habilidade substitutiva.');
+    const payload = {
+        patient_id: Number(pid),
+        target_behavior: targetBehavior,
+        reduction_plan: document.getElementById('blReductionPlan').value.trim(),
+        replacement_skill: replacementSkill,
+        replacement_skill_description: document.getElementById('blReplacementDescription').value.trim()
+    };
+    const res = await api('/api/behavior-links', 'POST', payload);
+    if (res.error) return showStatus('❌ ' + res.error, true);
+    showStatus('✅ Vínculo salvo!');
+    document.getElementById('blTargetBehavior').value = '';
+    document.getElementById('blReductionPlan').value = '';
+    document.getElementById('blReplacementSkill').value = '';
+    document.getElementById('blReplacementDescription').value = '';
+    loadBehaviorLinksHistory(pid);
+}
+
+async function loadBehaviorLinksHistory(pid) {
+    const rows = await api(`/api/behavior-links/${pid}`);
+    const container = document.getElementById('blHistory');
+    if (!rows.length) {
+        container.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:20px 0;">Nenhum vínculo registrado.</p>';
+        return;
+    }
+    container.innerHTML = rows.map(r => `
+        <div style="padding:16px 0;border-bottom:1px solid #f1f5f9;">
+            <div style="display:flex;gap:15px;flex-wrap:wrap;align-items:stretch;">
+                <div style="flex:1;min-width:220px;padding:12px;background:#fef2f2;border-radius:8px;">
+                    <div style="font-size:0.75rem;color:#991b1b;font-weight:700;text-transform:uppercase;margin-bottom:6px;">Comportamento-Problema</div>
+                    <div style="font-weight:700;color:#334155;margin-bottom:6px;">${escapeHtml(r.target_behavior)}</div>
+                    ${r.reduction_plan ? `<div style="font-size:0.85rem;color:#64748b;white-space:pre-wrap;">${escapeHtml(r.reduction_plan)}</div>` : ''}
+                </div>
+                <div style="align-self:center;font-size:1.3rem;color:#94a3b8;">→</div>
+                <div style="flex:1;min-width:220px;padding:12px;background:#f0fdf4;border-radius:8px;">
+                    <div style="font-size:0.75rem;color:#166534;font-weight:700;text-transform:uppercase;margin-bottom:6px;">Habilidade Substitutiva</div>
+                    <div style="font-weight:700;color:#334155;margin-bottom:6px;">${escapeHtml(r.replacement_skill)}</div>
+                    ${r.replacement_skill_description ? `<div style="font-size:0.85rem;color:#64748b;white-space:pre-wrap;">${escapeHtml(r.replacement_skill_description)}</div>` : ''}
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+// -- Dashboard --
+
+function renderClinicoBarChart(containerId, data) {
+    const container = document.getElementById(containerId);
+    if (data.every(d => d.value === 0)) {
+        container.innerHTML = '<p style="text-align:center;color:#94a3b8;padding:10px 0;">Sem dados no período selecionado.</p>';
+        return;
+    }
+    const max = Math.max(...data.map(d => d.value), 1);
+    container.innerHTML = data.map(d => {
+        const pct = d.value > 0 ? Math.max(Math.round((d.value / max) * 100), 3) : 0;
+        return `<div class="bar-row">
+            <div class="bar-label">${escapeHtml(d.label)}</div>
+            <div class="bar-track"><div class="bar-fill" style="width:${pct}%;"></div></div>
+            <div class="bar-value">${d.value}</div>
+        </div>`;
+    }).join('');
+}
+
+async function loadClinicoDashboard() {
+    const pid = document.getElementById('clinicoPatientSelect').value;
+    if (!pid) return;
+    const from = document.getElementById('dashFrom').value;
+    const to = document.getElementById('dashTo').value;
+    if (!from || !to) return;
+
+    const [sheets, probes, scatter, links] = await Promise.all([
+        api(`/api/data-sheets/${pid}`),
+        api(`/api/probe-tracking/${pid}`),
+        api(`/api/scatterplot/${pid}`),
+        api(`/api/behavior-links/${pid}`)
+    ]);
+
+    const inRange = dateStr => dateStr >= from && dateStr <= to;
+    const sheetsInRange = sheets.filter(s => inRange(s.date));
+    const probesInRange = probes.filter(p => inRange(p.date));
+    const scatterInRange = scatter.filter(s => inRange(s.date));
+
+    document.getElementById('dashSheetsCount').textContent = sheetsInRange.length;
+    document.getElementById('dashProbeCount').textContent = probesInRange.length;
+    document.getElementById('dashScatterCount').textContent = scatterInRange.length;
+    // Vínculos de comportamento são planos em vigor, não eventos datados:
+    // mostra o total ativo, independente do período selecionado.
+    document.getElementById('dashLinksCount').textContent = links.length;
+
+    const shiftCounts = { manha: 0, tarde: 0, noite: 0 };
+    scatterInRange.forEach(s => { if (shiftCounts[s.shift] !== undefined) shiftCounts[s.shift]++; });
+    renderClinicoBarChart('dashShiftChart', [
+        { label: 'Manhã', value: shiftCounts.manha },
+        { label: 'Tarde', value: shiftCounts.tarde },
+        { label: 'Noite', value: shiftCounts.noite }
+    ]);
+
+    const resultCounts = { atingiu: 0, parcial: 0, nao_atingiu: 0 };
+    probesInRange.forEach(p => { if (resultCounts[p.result] !== undefined) resultCounts[p.result]++; });
+    renderClinicoBarChart('dashProbeChart', [
+        { label: 'Atingiu', value: resultCounts.atingiu },
+        { label: 'Parcial', value: resultCounts.parcial },
+        { label: 'Não Atingiu', value: resultCounts.nao_atingiu }
+    ]);
 }
 
 renderModulesChecklist([]);
