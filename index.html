@@ -266,12 +266,12 @@
                 <div class="form-grid" style="margin-top:15px;">
                     <div><label>Abertura</label><input type="time" id="cfgOpenTime"></div>
                     <div><label>Fechamento</label><input type="time" id="cfgCloseTime"></div>
-                    <div><label>Tempo de Atendimento (min)</label><input type="number" id="cfgDuration" min="1"></div>
+                    <div><label>Tempo de Atendimento Padrão (min)</label><input type="number" id="cfgDuration" min="1"></div>
                     <div><label>Tempo de Troca / Descanso (min)</label><input type="number" id="cfgBuffer" min="0"></div>
                     <div><label>Valor Padrão do Atendimento (R$)</label><input type="number" id="cfgSessionPrice" min="0" step="0.01"></div>
                     <div class="form-full"><button class="btn-primary" onclick="saveSettings()">💾 Salvar Configurações</button></div>
                 </div>
-                <p style="font-size:0.8rem;color:#94a3b8;margin-top:10px;">Usado como valor do atendimento para profissionais que não têm um valor específico definido abaixo.</p>
+                <p style="font-size:0.8rem;color:#94a3b8;margin-top:10px;">Usados para profissionais que não têm valor e/ou tempo de atendimento específicos definidos abaixo.</p>
             </div>
             <div class="card">
                 <label>Valor do Atendimento por Profissional</label>
@@ -281,6 +281,15 @@
                     <div style="display:flex;align-items:flex-end;"><button class="btn-primary" onclick="saveProfessionalPrice()">💾 Salvar Valor</button></div>
                 </div>
                 <p style="font-size:0.8rem;color:#94a3b8;margin-top:10px;">Se definido, esse valor substitui o "Valor Padrão do Atendimento" para todos os atendimentos desse profissional no Financeiro.</p>
+            </div>
+            <div class="card">
+                <label>Tempo de Atendimento por Profissional</label>
+                <div class="form-grid" style="margin-top:15px;">
+                    <div class="form-full"><label>Profissional</label><select id="durationProfessionalSelect" onchange="loadProfessionalDuration()"><option value="">Selecione...</option></select></div>
+                    <div><label>Tempo de Atendimento (min)</label><input type="number" id="durationProfessionalValue" min="1" placeholder="Deixe em branco para usar o tempo padrão"></div>
+                    <div style="display:flex;align-items:flex-end;"><button class="btn-primary" onclick="saveProfessionalDuration()">💾 Salvar Tempo</button></div>
+                </div>
+                <p style="font-size:0.8rem;color:#94a3b8;margin-top:10px;">Se definido, esse tempo substitui o "Tempo de Atendimento Padrão" nos horários da Agenda desse profissional (ex.: médicos e enfermeiros costumam ter consultas mais curtas que fisioterapeutas ou fonoaudiólogos).</p>
             </div>
             <div class="card">
                 <label>Acesso de Profissionais aos Módulos</label>
@@ -573,6 +582,11 @@ async function refreshLists() {
     priceSelect.innerHTML = '<option value="">Selecione...</option>' + profOpts;
     if (prevPriceProf) priceSelect.value = prevPriceProf;
 
+    const durationSelect = document.getElementById('durationProfessionalSelect');
+    const prevDurationProf = durationSelect.value;
+    durationSelect.innerHTML = '<option value="">Selecione...</option>' + profOpts;
+    if (prevDurationProf) durationSelect.value = prevDurationProf;
+
     renderProfessionalsTable();
 
     const settings = await api('/api/settings');
@@ -652,6 +666,7 @@ async function openConfiguracoes() {
     await switchTab('configuracoes');
     if (document.getElementById('cfgProfessionalSelect').value) loadProfessionalModules();
     if (document.getElementById('priceProfessionalSelect').value) loadProfessionalPrice();
+    if (document.getElementById('durationProfessionalSelect').value) loadProfessionalDuration();
 }
 
 async function saveSettings() {
@@ -722,6 +737,26 @@ async function saveProfessionalPrice() {
     await refreshLists();
 }
 
+function loadProfessionalDuration() {
+    const profId = document.getElementById('durationProfessionalSelect').value;
+    const input = document.getElementById('durationProfessionalValue');
+    if (!profId) { input.value = ''; return; }
+    const prof = allProfessionals.find(p => String(p.id) === String(profId));
+    input.value = (prof && prof.duration_minutes !== null && prof.duration_minutes !== undefined) ? prof.duration_minutes : '';
+}
+
+async function saveProfessionalDuration() {
+    const profId = document.getElementById('durationProfessionalSelect').value;
+    if (!profId) return alert('Selecione um profissional.');
+    const raw = document.getElementById('durationProfessionalValue').value;
+    const duration = raw === '' ? null : Number(raw);
+    if (duration !== null && (isNaN(duration) || duration <= 0)) return alert('Informe um tempo de atendimento válido.');
+    const res = await api(`/api/professionals/${profId}/duration`, 'POST', { duration_minutes: duration });
+    if (res.error) return showStatus('❌ ' + res.error, true);
+    showStatus('✅ Tempo de atendimento do profissional salvo!');
+    await refreshLists();
+}
+
 async function openAgenda() {
     await switchTab('agenda');
     if (!document.getElementById('agendaDate').value) {
@@ -740,10 +775,13 @@ async function loadAgenda() {
     }
     currentAppointments = await api(`/api/appointments?date=${date}&professional_id=${profId}`);
     const settings = await api('/api/settings');
+    const professional = allProfessionals.find(p => String(p.id) === String(profId));
+    const duration = (professional && professional.duration_minutes !== null && professional.duration_minutes !== undefined)
+        ? professional.duration_minutes
+        : settings.session_duration_minutes;
     const slots = [];
     let cur = timeToMinutes(settings.clinic_open_time);
     const close = timeToMinutes(settings.clinic_close_time);
-    const duration = settings.session_duration_minutes;
     const step = duration + settings.buffer_minutes;
     while (cur + duration <= close) {
         slots.push({ start: cur, end: cur + duration });

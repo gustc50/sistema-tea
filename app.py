@@ -61,6 +61,7 @@ def init_db():
             dob TEXT,
             address TEXT,
             price REAL,
+            duration_minutes INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS professional_modules (
@@ -114,11 +115,14 @@ def init_db():
         conn.execute('ALTER TABLE settings ADD COLUMN session_price REAL DEFAULT 0')
     conn.commit()
 
-    # Bancos criados antes do valor por profissional existir não têm essa
-    # coluna. NULL significa "usa o valor padrão da clínica" (settings.session_price).
+    # Bancos criados antes do valor/tempo de atendimento por profissional
+    # existirem não têm essas colunas. NULL significa "usa o valor/tempo
+    # padrão da clínica" (settings.session_price / session_duration_minutes).
     professional_cols = [r['name'] for r in conn.execute("PRAGMA table_info(professionals)").fetchall()]
     if 'price' not in professional_cols:
         conn.execute('ALTER TABLE professionals ADD COLUMN price REAL')
+    if 'duration_minutes' not in professional_cols:
+        conn.execute('ALTER TABLE professionals ADD COLUMN duration_minutes INTEGER')
     conn.commit()
 
     # Bancos criados antes do módulo Financeiro não têm as colunas de
@@ -333,6 +337,22 @@ def set_professional_price(professional_id):
     conn.close()
     return jsonify({'status': 'ok', 'price': price})
 
+@app.route('/api/professionals/<int:professional_id>/duration', methods=['POST'])
+def set_professional_duration(professional_id):
+    data = request.json
+    raw_duration = data.get('duration_minutes')
+    try:
+        duration = None if raw_duration in (None, '') else int(raw_duration)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'duration_minutes inválido'}), 400
+    if duration is not None and duration <= 0:
+        return jsonify({'error': 'duration_minutes inválido'}), 400
+    conn = get_db()
+    conn.execute('UPDATE professionals SET duration_minutes = ? WHERE id = ?', (duration, professional_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'ok', 'duration_minutes': duration})
+
 @app.route('/api/settings', methods=['GET'])
 def get_settings():
     conn = get_db()
@@ -407,7 +427,9 @@ def add_appointment():
 
     conn = get_db()
     settings = conn.execute('SELECT * FROM settings WHERE id = 1').fetchone()
-    duration = settings['session_duration_minutes']
+    professional = conn.execute('SELECT duration_minutes FROM professionals WHERE id = ?', (professional_id,)).fetchone()
+    duration = (professional['duration_minutes'] if professional and professional['duration_minutes'] is not None
+                else settings['session_duration_minutes'])
     buffer_minutes = settings['buffer_minutes']
 
     start_min = _time_to_minutes(start_time)
