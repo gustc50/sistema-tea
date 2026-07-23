@@ -60,6 +60,7 @@ def init_db():
             council_registration TEXT,
             dob TEXT,
             address TEXT,
+            price REAL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         CREATE TABLE IF NOT EXISTS professional_modules (
@@ -111,6 +112,13 @@ def init_db():
             conn.execute(f'ALTER TABLE settings ADD COLUMN {col} TEXT')
     if 'session_price' not in settings_cols:
         conn.execute('ALTER TABLE settings ADD COLUMN session_price REAL DEFAULT 0')
+    conn.commit()
+
+    # Bancos criados antes do valor por profissional existir não têm essa
+    # coluna. NULL significa "usa o valor padrão da clínica" (settings.session_price).
+    professional_cols = [r['name'] for r in conn.execute("PRAGMA table_info(professionals)").fetchall()]
+    if 'price' not in professional_cols:
+        conn.execute('ALTER TABLE professionals ADD COLUMN price REAL')
     conn.commit()
 
     # Bancos criados antes do módulo Financeiro não têm as colunas de
@@ -309,6 +317,22 @@ def set_professional_modules(professional_id):
     conn.close()
     return jsonify({'status': 'ok'})
 
+@app.route('/api/professionals/<int:professional_id>/price', methods=['POST'])
+def set_professional_price(professional_id):
+    data = request.json
+    raw_price = data.get('price')
+    try:
+        price = None if raw_price in (None, '') else float(raw_price)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'price inválido'}), 400
+    if price is not None and price < 0:
+        return jsonify({'error': 'price inválido'}), 400
+    conn = get_db()
+    conn.execute('UPDATE professionals SET price = ? WHERE id = ?', (price, professional_id))
+    conn.commit()
+    conn.close()
+    return jsonify({'status': 'ok', 'price': price})
+
 @app.route('/api/settings', methods=['GET'])
 def get_settings():
     conn = get_db()
@@ -438,9 +462,11 @@ def get_financeiro():
     conn = get_db()
     rows = conn.execute('''
         SELECT a.id, a.patient_id, a.professional_id, a.date, a.start_time, a.end_time,
-               a.paid, a.paid_date, p.name AS patient_name, p.payment_responsible, p.guardian_name
+               a.paid, a.paid_date, p.name AS patient_name, p.payment_responsible, p.guardian_name,
+               pr.full_name AS professional_name, pr.price AS professional_price
         FROM appointments a
         JOIN patients p ON p.id = a.patient_id
+        JOIN professionals pr ON pr.id = a.professional_id
         WHERE a.date LIKE ?
         ORDER BY a.date, a.start_time
     ''', (month_prefix + '%',)).fetchall()
@@ -575,9 +601,11 @@ def export_financeiro_xlsx():
 
     conn = get_db()
     query = '''
-        SELECT a.date, a.start_time, a.paid, a.paid_date, p.name AS patient_name, p.payment_responsible
+        SELECT a.date, a.start_time, a.paid, a.paid_date, p.name AS patient_name, p.payment_responsible,
+               pr.full_name AS professional_name, pr.price AS professional_price
         FROM appointments a
         JOIN patients p ON p.id = a.patient_id
+        JOIN professionals pr ON pr.id = a.professional_id
         WHERE a.date LIKE ?
     '''
     params = [month_prefix + '%']
@@ -589,16 +617,17 @@ def export_financeiro_xlsx():
     settings = conn.execute('SELECT session_price FROM settings WHERE id = 1').fetchone()
     conn.close()
 
-    price = round(settings['session_price'] or 0, 2)
+    default_price = settings['session_price'] or 0
     payer_labels = {'paciente': 'Paciente', 'responsavel': 'Responsável'}
-    headers = ['Paciente', 'Responsável pelo Pagamento', 'Data', 'Horário', 'Valor (R$)', 'Status', 'Data do Pagamento']
+    headers = ['Paciente', 'Profissional', 'Responsável pelo Pagamento', 'Data', 'Horário', 'Valor (R$)', 'Status', 'Data do Pagamento']
     data_rows = [
         [
             r['patient_name'],
+            r['professional_name'],
             payer_labels.get(r['payment_responsible'], '-'),
             _br_date(r['date']),
             r['start_time'],
-            price,
+            round(r['professional_price'] if r['professional_price'] is not None else default_price, 2),
             'Baixado' if r['paid'] else 'Não baixado',
             _br_date(r['paid_date']) if r['paid_date'] else '-'
         ]

@@ -234,7 +234,7 @@
                 </div>
                 <div id="financeiroSummary" style="display:flex;gap:30px;flex-wrap:wrap;margin-bottom:20px;padding:15px;background:#f8fafc;border-radius:8px;font-size:0.9rem;color:#334155;"></div>
                 <table>
-                    <thead><tr><th>Paciente</th><th>Resp. Pagamento</th><th>Data</th><th>Horário</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+                    <thead><tr><th>Paciente</th><th>Profissional</th><th>Resp. Pagamento</th><th>Data</th><th>Horário</th><th>Valor</th><th>Status</th><th></th></tr></thead>
                     <tbody id="financeiroTableBody"></tbody>
                 </table>
             </div>
@@ -268,9 +268,19 @@
                     <div><label>Fechamento</label><input type="time" id="cfgCloseTime"></div>
                     <div><label>Tempo de Atendimento (min)</label><input type="number" id="cfgDuration" min="1"></div>
                     <div><label>Tempo de Troca / Descanso (min)</label><input type="number" id="cfgBuffer" min="0"></div>
-                    <div><label>Valor do Atendimento (R$)</label><input type="number" id="cfgSessionPrice" min="0" step="0.01"></div>
+                    <div><label>Valor Padrão do Atendimento (R$)</label><input type="number" id="cfgSessionPrice" min="0" step="0.01"></div>
                     <div class="form-full"><button class="btn-primary" onclick="saveSettings()">💾 Salvar Configurações</button></div>
                 </div>
+                <p style="font-size:0.8rem;color:#94a3b8;margin-top:10px;">Usado como valor do atendimento para profissionais que não têm um valor específico definido abaixo.</p>
+            </div>
+            <div class="card">
+                <label>Valor do Atendimento por Profissional</label>
+                <div class="form-grid" style="margin-top:15px;">
+                    <div class="form-full"><label>Profissional</label><select id="priceProfessionalSelect" onchange="loadProfessionalPrice()"><option value="">Selecione...</option></select></div>
+                    <div><label>Valor do Atendimento (R$)</label><input type="number" id="priceProfessionalValue" min="0" step="0.01" placeholder="Deixe em branco para usar o valor padrão"></div>
+                    <div style="display:flex;align-items:flex-end;"><button class="btn-primary" onclick="saveProfessionalPrice()">💾 Salvar Valor</button></div>
+                </div>
+                <p style="font-size:0.8rem;color:#94a3b8;margin-top:10px;">Se definido, esse valor substitui o "Valor Padrão do Atendimento" para todos os atendimentos desse profissional no Financeiro.</p>
             </div>
             <div class="card">
                 <label>Acesso de Profissionais aos Módulos</label>
@@ -558,6 +568,11 @@ async function refreshLists() {
     cfgSelect.innerHTML = '<option value="">Selecione...</option>' + profOpts;
     if (prevCfgProf) cfgSelect.value = prevCfgProf;
 
+    const priceSelect = document.getElementById('priceProfessionalSelect');
+    const prevPriceProf = priceSelect.value;
+    priceSelect.innerHTML = '<option value="">Selecione...</option>' + profOpts;
+    if (prevPriceProf) priceSelect.value = prevPriceProf;
+
     renderProfessionalsTable();
 
     const settings = await api('/api/settings');
@@ -636,6 +651,7 @@ async function saveProfessional() {
 async function openConfiguracoes() {
     await switchTab('configuracoes');
     if (document.getElementById('cfgProfessionalSelect').value) loadProfessionalModules();
+    if (document.getElementById('priceProfessionalSelect').value) loadProfessionalPrice();
 }
 
 async function saveSettings() {
@@ -684,6 +700,26 @@ async function saveProfessionalModules() {
     const modules = Array.from(document.querySelectorAll('#modulesChecklist input:checked')).map(el => el.value);
     await api(`/api/professional-modules/${profId}`, 'POST', { modules });
     showStatus('✅ Acesso aos módulos salvo!');
+}
+
+function loadProfessionalPrice() {
+    const profId = document.getElementById('priceProfessionalSelect').value;
+    const input = document.getElementById('priceProfessionalValue');
+    if (!profId) { input.value = ''; return; }
+    const prof = allProfessionals.find(p => String(p.id) === String(profId));
+    input.value = (prof && prof.price !== null && prof.price !== undefined) ? prof.price : '';
+}
+
+async function saveProfessionalPrice() {
+    const profId = document.getElementById('priceProfessionalSelect').value;
+    if (!profId) return alert('Selecione um profissional.');
+    const raw = document.getElementById('priceProfessionalValue').value;
+    const price = raw === '' ? null : Number(raw);
+    if (price !== null && (isNaN(price) || price < 0)) return alert('Informe um valor válido.');
+    const res = await api(`/api/professionals/${profId}/price`, 'POST', { price });
+    if (res.error) return showStatus('❌ ' + res.error, true);
+    showStatus('✅ Valor do profissional salvo!');
+    await refreshLists();
 }
 
 async function openAgenda() {
@@ -760,10 +796,16 @@ async function cancelAppointment(id) {
 
 let financeiroRaw = [];
 let currentFinanceiro = [];
-let currentFinanceiroPrice = 0;
+let defaultSessionPrice = 0;
 
 function formatCurrency(v) {
     return (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function financeiroRowPrice(f) {
+    return (f.professional_price !== null && f.professional_price !== undefined)
+        ? Number(f.professional_price)
+        : defaultSessionPrice;
 }
 
 async function openFinanceiro() {
@@ -786,7 +828,7 @@ async function loadFinanceiro() {
 
     financeiroRaw = await api(`/api/financeiro?year=${year}&month=${month}`);
     const settings = await api('/api/settings');
-    currentFinanceiroPrice = Number(settings.session_price) || 0;
+    defaultSessionPrice = Number(settings.session_price) || 0;
     applyFinanceiroPatientFilter();
 }
 
@@ -801,13 +843,13 @@ function renderFinanceiroTable() {
     const summary = document.getElementById('financeiroSummary');
 
     if (!document.getElementById('finMonth').value || !document.getElementById('finYear').value) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:30px;">Selecione o mês e o ano.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:30px;">Selecione o mês e o ano.</td></tr>';
         summary.innerHTML = '';
         return;
     }
 
     if (!currentFinanceiro.length) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:30px;">Nenhum atendimento nesse período.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:#94a3b8;padding:30px;">Nenhum atendimento nesse período.</td></tr>';
         summary.innerHTML = '';
         return;
     }
@@ -820,18 +862,19 @@ function renderFinanceiroTable() {
             : '';
         return `<tr>
             <td><strong>${escapeHtml(f.patient_name)}</strong></td>
+            <td>${escapeHtml(f.professional_name)}</td>
             <td>${escapeHtml(payerLabel)}</td>
             <td>${new Date(f.date+'T00:00:00').toLocaleDateString('pt-BR')}</td>
             <td>${escapeHtml(f.start_time)}</td>
-            <td>${formatCurrency(currentFinanceiroPrice)}</td>
+            <td>${formatCurrency(financeiroRowPrice(f))}</td>
             <td><span class="badge ${isPaid ? 'badge-low' : 'badge-high'}">${isPaid ? 'Baixado' : 'Não baixado'}</span>${paidDateHtml}</td>
             <td>${isPaid ? '' : `<button class="btn-primary" style="padding:6px 14px;font-size:0.8rem;" onclick="markPaid(${f.id})">✅ Pago</button>`}</td>
         </tr>`;
     }).join('');
 
-    const total = currentFinanceiro.length * currentFinanceiroPrice;
+    const total = currentFinanceiro.reduce((sum, f) => sum + financeiroRowPrice(f), 0);
+    const paidTotal = currentFinanceiro.filter(f => f.paid).reduce((sum, f) => sum + financeiroRowPrice(f), 0);
     const paidCount = currentFinanceiro.filter(f => f.paid).length;
-    const paidTotal = paidCount * currentFinanceiroPrice;
     const pendingTotal = total - paidTotal;
     summary.innerHTML = `
         <div>${currentFinanceiro.length} atendimento(s) — Total: <strong>${formatCurrency(total)}</strong></div>
@@ -883,18 +926,19 @@ function exportFinanceiroPdf() {
         const paidDate = isPaid && f.paid_date ? new Date(f.paid_date+'T00:00:00').toLocaleDateString('pt-BR') : '-';
         return `<tr>
             <td>${escapeHtml(f.patient_name)}</td>
+            <td>${escapeHtml(f.professional_name)}</td>
             <td>${escapeHtml(payerLabel)}</td>
             <td>${new Date(f.date+'T00:00:00').toLocaleDateString('pt-BR')}</td>
             <td>${escapeHtml(f.start_time)}</td>
-            <td>${formatCurrency(currentFinanceiroPrice)}</td>
+            <td>${formatCurrency(financeiroRowPrice(f))}</td>
             <td>${isPaid ? 'Baixado' : 'Não baixado'}</td>
             <td>${paidDate}</td>
         </tr>`;
     }).join('');
 
-    const total = currentFinanceiro.length * currentFinanceiroPrice;
+    const total = currentFinanceiro.reduce((sum, f) => sum + financeiroRowPrice(f), 0);
+    const paidTotal = currentFinanceiro.filter(f => f.paid).reduce((sum, f) => sum + financeiroRowPrice(f), 0);
     const paidCount = currentFinanceiro.filter(f => f.paid).length;
-    const paidTotal = paidCount * currentFinanceiroPrice;
     const pendingTotal = total - paidTotal;
 
     const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Financeiro - ${escapeHtml(monthLabel)}/${escapeHtml(year)}</title>
@@ -911,7 +955,7 @@ function exportFinanceiroPdf() {
             <p class="summary">Total do período: <strong>${formatCurrency(total)}</strong> — Baixado: ${formatCurrency(paidTotal)} (${paidCount}) — Não baixado: ${formatCurrency(pendingTotal)} (${currentFinanceiro.length - paidCount})</p>
             <p class="summary">Emitido em ${new Date().toLocaleString('pt-BR')}</p>
             <table>
-                <thead><tr><th>Paciente</th><th>Resp. Pagamento</th><th>Data</th><th>Horário</th><th>Valor</th><th>Status</th><th>Data Pagamento</th></tr></thead>
+                <thead><tr><th>Paciente</th><th>Profissional</th><th>Resp. Pagamento</th><th>Data</th><th>Horário</th><th>Valor</th><th>Status</th><th>Data Pagamento</th></tr></thead>
                 <tbody>${rowsHtml}</tbody>
             </table>
         </body></html>`;
