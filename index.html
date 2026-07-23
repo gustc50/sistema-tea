@@ -220,6 +220,7 @@
                     </select>
                 </div>
                 <div><label>Ano</label><input type="number" id="finYear" onchange="loadFinanceiro()"></div>
+                <div><label>Paciente</label><select id="finPatientSelect" onchange="applyFinanceiroPatientFilter()"><option value="">Todos</option></select></div>
                 <div><label>Data do Pagamento *</label><input type="date" id="finPaidDate"></div>
             </div>
             <div class="card">
@@ -227,7 +228,8 @@
                     <label style="margin:0;">Atendimentos do Período</label>
                     <div style="display:flex;gap:10px;flex-wrap:wrap;">
                         <button class="btn-primary" onclick="markAllPaid()">💰 Todos Pagos</button>
-                        <button class="btn-primary" onclick="exportFinanceiroPdf()">📄 Exportar</button>
+                        <button class="btn-primary" onclick="exportFinanceiroPdf()">📄 Exportar PDF</button>
+                        <button class="btn-primary" onclick="exportFinanceiroXlsx()">📊 Exportar XLSX</button>
                     </div>
                 </div>
                 <div id="financeiroSummary" style="display:flex;gap:30px;flex-wrap:wrap;margin-bottom:20px;padding:15px;background:#f8fafc;border-radius:8px;font-size:0.9rem;color:#334155;"></div>
@@ -535,6 +537,11 @@ async function refreshLists() {
     document.getElementById('testPatientSelect').innerHTML = '<option value="">Selecione...</option>' + opts;
     document.getElementById('prontPatientSelect').innerHTML = '<option value="">-- Escolha --</option>' + opts;
 
+    const finPatientSelect = document.getElementById('finPatientSelect');
+    const prevFinPatient = finPatientSelect.value;
+    finPatientSelect.innerHTML = '<option value="">Todos</option>' + opts;
+    if (prevFinPatient) finPatientSelect.value = prevFinPatient;
+
     renderPatientsTable(document.getElementById('patientSearch')?.value || '');
 
     allProfessionals = await api('/api/professionals');
@@ -751,6 +758,7 @@ async function cancelAppointment(id) {
     loadAgenda();
 }
 
+let financeiroRaw = [];
 let currentFinanceiro = [];
 let currentFinanceiroPrice = 0;
 
@@ -770,17 +778,33 @@ async function openFinanceiro() {
 async function loadFinanceiro() {
     const month = document.getElementById('finMonth').value;
     const year = document.getElementById('finYear').value;
+    if (!month || !year) {
+        financeiroRaw = [];
+        renderFinanceiroTable();
+        return;
+    }
+
+    financeiroRaw = await api(`/api/financeiro?year=${year}&month=${month}`);
+    const settings = await api('/api/settings');
+    currentFinanceiroPrice = Number(settings.session_price) || 0;
+    applyFinanceiroPatientFilter();
+}
+
+function applyFinanceiroPatientFilter() {
+    const patientId = document.getElementById('finPatientSelect').value;
+    currentFinanceiro = patientId ? financeiroRaw.filter(f => String(f.patient_id) === String(patientId)) : financeiroRaw;
+    renderFinanceiroTable();
+}
+
+function renderFinanceiroTable() {
     const tbody = document.getElementById('financeiroTableBody');
     const summary = document.getElementById('financeiroSummary');
-    if (!month || !year) {
+
+    if (!document.getElementById('finMonth').value || !document.getElementById('finYear').value) {
         tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:30px;">Selecione o mês e o ano.</td></tr>';
         summary.innerHTML = '';
         return;
     }
-
-    currentFinanceiro = await api(`/api/financeiro?year=${year}&month=${month}`);
-    const settings = await api('/api/settings');
-    currentFinanceiroPrice = Number(settings.session_price) || 0;
 
     if (!currentFinanceiro.length) {
         tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:30px;">Nenhum atendimento nesse período.</td></tr>';
@@ -831,11 +855,20 @@ async function markAllPaid() {
     const month = document.getElementById('finMonth').value;
     const year = document.getElementById('finYear').value;
     if (!month || !year) return alert('Selecione o mês e o ano.');
-    if (!currentFinanceiro.some(f => !f.paid)) return alert('Não há atendimentos pendentes nesse período.');
-    if (!confirm('Marcar todos os atendimentos não baixados deste mês como pagos?')) return;
-    const res = await api('/api/appointments/pay-all', 'POST', { year, month, paid_date: paidDate });
-    if (res.error) return showStatus('❌ ' + res.error, true);
-    showStatus(`✅ ${res.updated} atendimento(s) marcados como pagos!`);
+    const pending = currentFinanceiro.filter(f => !f.paid);
+    if (!pending.length) return alert('Não há atendimentos pendentes nesse período.');
+    const patientId = document.getElementById('finPatientSelect').value;
+    if (!confirm(`Marcar ${pending.length} atendimento(s) como pago(s)?`)) return;
+
+    if (patientId) {
+        // Filtro por paciente ativo: dá baixa só nos atendimentos exibidos.
+        await Promise.all(pending.map(f => api(`/api/appointments/${f.id}/pay`, 'POST', { paid_date: paidDate })));
+        showStatus(`✅ ${pending.length} atendimento(s) marcados como pagos!`);
+    } else {
+        const res = await api('/api/appointments/pay-all', 'POST', { year, month, paid_date: paidDate });
+        if (res.error) return showStatus('❌ ' + res.error, true);
+        showStatus(`✅ ${res.updated} atendimento(s) marcados como pagos!`);
+    }
     loadFinanceiro();
 }
 
@@ -887,6 +920,16 @@ function exportFinanceiroPdf() {
     win.document.close();
     win.focus();
     setTimeout(() => win.print(), 300);
+}
+
+function exportFinanceiroXlsx() {
+    if (!currentFinanceiro.length) return alert('Nenhum atendimento para exportar neste período.');
+    const month = document.getElementById('finMonth').value;
+    const year = document.getElementById('finYear').value;
+    const patientId = document.getElementById('finPatientSelect').value;
+    let url = `${API}/api/financeiro/export.xlsx?year=${year}&month=${month}`;
+    if (patientId) url += `&patient_id=${patientId}`;
+    window.location.href = url;
 }
 
 function renderPatientsTable(filter='') {

@@ -2,6 +2,9 @@ from flask import Flask, request, jsonify, send_file
 import sqlite3
 import os
 import json
+import io
+import zipfile
+from xml.sax.saxutils import escape as xml_escape
 
 app = Flask(__name__)
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'prontuario_tea.db')
@@ -477,6 +480,138 @@ def pay_all_appointments():
     updated = cursor.rowcount
     conn.close()
     return jsonify({'status': 'ok', 'updated': updated})
+
+def _xlsx_col_letter(idx):
+    return chr(65 + idx)
+
+def _xlsx_cell(col_idx, row_num, value):
+    ref = f'{_xlsx_col_letter(col_idx)}{row_num}'
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return f'<c r="{ref}"><v>{value}</v></c>'
+    text = xml_escape('' if value is None else str(value))
+    return f'<c r="{ref}" t="inlineStr"><is><t xml:space="preserve">{text}</t></is></c>'
+
+def build_xlsx(headers, rows):
+    """Gera um .xlsx válido (OOXML) usando só a biblioteca padrão do Python
+    (zipfile + XML), sem depender de openpyxl/xlsxwriter."""
+    sheet_rows = [f'<row r="1">{"".join(_xlsx_cell(i, 1, h) for i, h in enumerate(headers))}</row>']
+    for r, row in enumerate(rows, start=2):
+        sheet_rows.append(f'<row r="{r}">{"".join(_xlsx_cell(i, r, v) for i, v in enumerate(row))}</row>')
+    sheet_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<sheetData>' + ''.join(sheet_rows) + '</sheetData>'
+        '</worksheet>'
+    )
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+        '</Types>'
+    )
+    root_rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+        '</Relationships>'
+    )
+    workbook_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        '<sheets><sheet name="Financeiro" sheetId="1" r:id="rId1"/></sheets>'
+        '</workbook>'
+    )
+    workbook_rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+        '</Relationships>'
+    )
+    styles_xml = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>'
+        '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>'
+        '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+        '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+        '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>'
+        '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+        '</styleSheet>'
+    )
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as z:
+        z.writestr('[Content_Types].xml', content_types)
+        z.writestr('_rels/.rels', root_rels)
+        z.writestr('xl/workbook.xml', workbook_xml)
+        z.writestr('xl/_rels/workbook.xml.rels', workbook_rels)
+        z.writestr('xl/styles.xml', styles_xml)
+        z.writestr('xl/worksheets/sheet1.xml', sheet_xml)
+    buf.seek(0)
+    return buf
+
+def _br_date(iso_date):
+    if not iso_date:
+        return '-'
+    parts = iso_date.split('-')
+    return f'{parts[2]}/{parts[1]}/{parts[0]}' if len(parts) == 3 else iso_date
+
+@app.route('/api/financeiro/export.xlsx', methods=['GET'])
+def export_financeiro_xlsx():
+    year = request.args.get('year')
+    month = request.args.get('month')
+    patient_id = request.args.get('patient_id')
+    if not year or not month:
+        return jsonify({'error': 'year e month são obrigatórios'}), 400
+    try:
+        month_prefix = f'{int(year):04d}-{int(month):02d}'
+    except ValueError:
+        return jsonify({'error': 'year e month inválidos'}), 400
+
+    conn = get_db()
+    query = '''
+        SELECT a.date, a.start_time, a.paid, a.paid_date, p.name AS patient_name, p.payment_responsible
+        FROM appointments a
+        JOIN patients p ON p.id = a.patient_id
+        WHERE a.date LIKE ?
+    '''
+    params = [month_prefix + '%']
+    if patient_id:
+        query += ' AND a.patient_id = ?'
+        params.append(patient_id)
+    query += ' ORDER BY a.date, a.start_time'
+    rows = conn.execute(query, params).fetchall()
+    settings = conn.execute('SELECT session_price FROM settings WHERE id = 1').fetchone()
+    conn.close()
+
+    price = round(settings['session_price'] or 0, 2)
+    payer_labels = {'paciente': 'Paciente', 'responsavel': 'Responsável'}
+    headers = ['Paciente', 'Responsável pelo Pagamento', 'Data', 'Horário', 'Valor (R$)', 'Status', 'Data do Pagamento']
+    data_rows = [
+        [
+            r['patient_name'],
+            payer_labels.get(r['payment_responsible'], '-'),
+            _br_date(r['date']),
+            r['start_time'],
+            price,
+            'Baixado' if r['paid'] else 'Não baixado',
+            _br_date(r['paid_date']) if r['paid_date'] else '-'
+        ]
+        for r in rows
+    ]
+
+    xlsx_buf = build_xlsx(headers, data_rows)
+    return send_file(
+        xlsx_buf,
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        as_attachment=True,
+        download_name=f'financeiro_{month_prefix}.xlsx'
+    )
 
 if __name__ == '__main__':
     init_db()
