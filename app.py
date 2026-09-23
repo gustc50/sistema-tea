@@ -231,6 +231,13 @@ def init_db():
         conn.execute('ALTER TABLE notes ADD COLUMN professional_id INTEGER REFERENCES professionals(id)')
         conn.commit()
 
+    # Vínculo opcional entre o atendimento registrado no prontuário e o
+    # horário da Agenda que ele documenta. Notas antigas ficam sem vínculo.
+    note_cols = [r['name'] for r in conn.execute("PRAGMA table_info(notes)").fetchall()]
+    if 'appointment_id' not in note_cols:
+        conn.execute('ALTER TABLE notes ADD COLUMN appointment_id INTEGER REFERENCES appointments(id)')
+        conn.commit()
+
     conn.close()
 
 # --- ROTAS DA API ---
@@ -297,7 +304,7 @@ def get_tests(patient_id):
 def get_notes(patient_id):
     conn = get_db()
     notes = conn.execute(
-        'SELECT id, patient_id, appointment_at, content, professional_id, created_at FROM notes WHERE patient_id = ? ORDER BY appointment_at DESC',
+        'SELECT id, patient_id, appointment_at, content, professional_id, appointment_id, created_at FROM notes WHERE patient_id = ? ORDER BY appointment_at DESC',
         (patient_id,)
     ).fetchall()
     conn.close()
@@ -309,17 +316,29 @@ def save_notes(patient_id):
     appointment_at = (data.get('appointment_at') or '').strip()
     content = (data.get('content') or '').strip()
     professional_id = data.get('professional_id')
+    appointment_id = data.get('appointment_id')
     if not appointment_at or not content or not professional_id:
         return jsonify({'error': 'appointment_at, content e professional_id são obrigatórios'}), 400
     conn = get_db()
+    if appointment_id:
+        appointment = conn.execute('SELECT patient_id FROM appointments WHERE id = ?', (appointment_id,)).fetchone()
+        if not appointment or appointment['patient_id'] != patient_id:
+            conn.close()
+            return jsonify({'error': 'Agendamento inválido para este paciente'}), 400
+        if conn.execute('SELECT id FROM notes WHERE appointment_id = ?', (appointment_id,)).fetchone():
+            conn.close()
+            return jsonify({'error': 'Este agendamento já tem um atendimento registrado no prontuário'}), 409
     cursor = conn.execute(
-        'INSERT INTO notes (patient_id, appointment_at, content, professional_id) VALUES (?, ?, ?, ?)',
-        (patient_id, appointment_at, content, professional_id)
+        'INSERT INTO notes (patient_id, appointment_at, content, professional_id, appointment_id) VALUES (?, ?, ?, ?, ?)',
+        (patient_id, appointment_at, content, professional_id, appointment_id)
     )
     conn.commit()
     new_id = cursor.lastrowid
     conn.close()
-    return jsonify({'id': new_id, 'patient_id': patient_id, 'appointment_at': appointment_at, 'content': content, 'professional_id': professional_id}), 201
+    return jsonify({
+        'id': new_id, 'patient_id': patient_id, 'appointment_at': appointment_at, 'content': content,
+        'professional_id': professional_id, 'appointment_id': appointment_id
+    }), 201
 
 @app.route('/api/professionals', methods=['GET'])
 def get_professionals():
@@ -452,15 +471,22 @@ def _minutes_to_time(mins):
 def get_appointments():
     date = request.args.get('date')
     professional_id = request.args.get('professional_id')
-    query = 'SELECT * FROM appointments WHERE 1=1'
+    patient_id = request.args.get('patient_id')
+    query = '''
+        SELECT a.*, (SELECT n.id FROM notes n WHERE n.appointment_id = a.id LIMIT 1) AS note_id
+        FROM appointments a WHERE 1=1
+    '''
     params = []
     if date:
-        query += ' AND date = ?'
+        query += ' AND a.date = ?'
         params.append(date)
     if professional_id:
-        query += ' AND professional_id = ?'
+        query += ' AND a.professional_id = ?'
         params.append(professional_id)
-    query += ' ORDER BY start_time'
+    if patient_id:
+        query += ' AND a.patient_id = ?'
+        params.append(patient_id)
+    query += ' ORDER BY a.date, a.start_time'
     conn = get_db()
     rows = conn.execute(query, params).fetchall()
     conn.close()
@@ -517,6 +543,11 @@ def add_appointment():
 @app.route('/api/appointments/<int:appointment_id>', methods=['DELETE'])
 def delete_appointment(appointment_id):
     conn = get_db()
+    # O atendimento do prontuário é imutável; cancelar o horário deixaria o
+    # registro clínico apontando para um agendamento que não existe mais.
+    if conn.execute('SELECT id FROM notes WHERE appointment_id = ?', (appointment_id,)).fetchone():
+        conn.close()
+        return jsonify({'error': 'Não é possível cancelar: este horário já tem atendimento registrado no prontuário.'}), 409
     conn.execute('DELETE FROM appointments WHERE id = ?', (appointment_id,))
     conn.commit()
     conn.close()
@@ -662,7 +693,8 @@ def get_financeiro():
     rows = conn.execute('''
         SELECT a.id, a.patient_id, a.professional_id, a.date, a.start_time, a.end_time,
                a.paid, a.paid_date, p.name AS patient_name, p.payment_responsible, p.guardian_name,
-               pr.full_name AS professional_name, pr.price AS professional_price
+               pr.full_name AS professional_name, pr.price AS professional_price,
+               (SELECT n.id FROM notes n WHERE n.appointment_id = a.id LIMIT 1) AS note_id
         FROM appointments a
         JOIN patients p ON p.id = a.patient_id
         JOIN professionals pr ON pr.id = a.professional_id
@@ -786,6 +818,13 @@ def _br_date(iso_date):
     parts = iso_date.split('-')
     return f'{parts[2]}/{parts[1]}/{parts[0]}' if len(parts) == 3 else iso_date
 
+def _payer_label(payment_responsible, guardian_name):
+    if payment_responsible == 'paciente':
+        return 'Paciente'
+    if payment_responsible == 'responsavel':
+        return f'Responsável ({guardian_name})' if guardian_name else 'Responsável'
+    return '-'
+
 @app.route('/api/financeiro/export.xlsx', methods=['GET'])
 def export_financeiro_xlsx():
     year = request.args.get('year')
@@ -801,7 +840,8 @@ def export_financeiro_xlsx():
     conn = get_db()
     query = '''
         SELECT a.date, a.start_time, a.paid, a.paid_date, p.name AS patient_name, p.payment_responsible,
-               pr.full_name AS professional_name, pr.price AS professional_price
+               p.guardian_name, pr.full_name AS professional_name, pr.price AS professional_price,
+               (SELECT n.id FROM notes n WHERE n.appointment_id = a.id LIMIT 1) AS note_id
         FROM appointments a
         JOIN patients p ON p.id = a.patient_id
         JOIN professionals pr ON pr.id = a.professional_id
@@ -817,16 +857,17 @@ def export_financeiro_xlsx():
     conn.close()
 
     default_price = settings['session_price'] or 0
-    payer_labels = {'paciente': 'Paciente', 'responsavel': 'Responsável'}
-    headers = ['Paciente', 'Profissional', 'Responsável pelo Pagamento', 'Data', 'Horário', 'Valor (R$)', 'Status', 'Data do Pagamento']
+    headers = ['Paciente', 'Profissional', 'Responsável pelo Pagamento', 'Data', 'Horário', 'Valor (R$)',
+               'Atendimento', 'Status', 'Data do Pagamento']
     data_rows = [
         [
             r['patient_name'],
             r['professional_name'],
-            payer_labels.get(r['payment_responsible'], '-'),
+            _payer_label(r['payment_responsible'], r['guardian_name']),
             _br_date(r['date']),
             r['start_time'],
             round(r['professional_price'] if r['professional_price'] is not None else default_price, 2),
+            'Registrado' if r['note_id'] else 'Sem registro',
             'Baixado' if r['paid'] else 'Não baixado',
             _br_date(r['paid_date']) if r['paid_date'] else '-'
         ]

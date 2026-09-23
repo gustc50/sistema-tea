@@ -70,7 +70,7 @@
         <button onclick="switchTab('cadastro')" class="active" id="nav-cadastro">👤 Cadastro</button>
         <button onclick="switchTab('testes')" id="nav-testes">📋 Aplicar Testes</button>
         <button onclick="openAtendimentoClinico()" id="nav-atendimento">🧠 Atendimento Clínico</button>
-        <button onclick="switchTab('prontuario')" id="nav-prontuario">📂 Prontuário</button>
+        <button onclick="openProntuarioTab()" id="nav-prontuario">📂 Prontuário</button>
         <button onclick="openAgenda()" id="nav-agenda">🗓️ Agenda</button>
         <button onclick="switchTab('profissionais')" id="nav-profissionais">🩺 Profissionais</button>
         <button onclick="openFinanceiro()" id="nav-financeiro">💰 Financeiro</button>
@@ -125,7 +125,7 @@
         <div id="tab-testes" class="tab-content">
             <h1>Aplicação de Protocolos</h1>
             <div class="card form-grid">
-                <div><label>Paciente</label><select id="testPatientSelect"><option value="">Selecione...</option></select></div>
+                <div><label>Paciente</label><select id="testPatientSelect" onchange="setCurrentPatient(this.value)"><option value="">Selecione...</option></select></div>
                 <div><label>Protocolo</label><select id="testType" onchange="renderTestForm()"><option value="">Selecione...</option><option value="aq10">AQ-10 (Adultos)</option><option value="aq50">AQ-50 (Adultos)</option><option value="mchat">M-CHAT-R/F (Crianças)</option></select></div>
             </div>
             <form id="dynamicTestForm" class="card" style="display:none;"></form>
@@ -134,7 +134,13 @@
         <!-- ATENDIMENTO CLÍNICO -->
         <div id="tab-atendimento" class="tab-content">
             <h1>Atendimento Clínico</h1>
-            <div class="card no-print"><label>Paciente</label><select id="clinicoPatientSelect" onchange="loadAtendimentoClinico()"><option value="">-- Escolha --</option></select></div>
+            <div class="card no-print">
+                <label>Paciente</label>
+                <div style="display:flex;gap:10px;">
+                    <select id="clinicoPatientSelect" onchange="loadAtendimentoClinico()"><option value="">-- Escolha --</option></select>
+                    <button class="btn-primary" style="background:#475569;white-space:nowrap;" onclick="openProntuarioFromClinico()">📂 Prontuário</button>
+                </div>
+            </div>
             <div id="clinicoContent" style="display:none;">
                 <div class="subnav">
                     <button onclick="switchClinicoSubTab('coleta')" class="active" id="subnav-coleta">📝 Coleta de Dados</button>
@@ -268,6 +274,16 @@
                         <div id="dashShiftChart" style="margin-top:15px;"></div>
                     </div>
                     <div class="card">
+                        <label>Agenda, Prontuário e Testes no Período</label>
+                        <div style="display:flex;gap:15px;flex-wrap:wrap;margin:15px 0 20px;">
+                            <div class="stat-tile"><div class="stat-value" id="dashApptCount">0</div><div class="stat-label">Sessões agendadas</div></div>
+                            <div class="stat-tile"><div class="stat-value" id="dashUnregisteredCount">0</div><div class="stat-label">Sessões sem registro no prontuário (até hoje)</div></div>
+                            <div class="stat-tile"><div class="stat-value" id="dashNotesCount">0</div><div class="stat-label">Atendimentos no prontuário</div></div>
+                            <div class="stat-tile"><div class="stat-value" id="dashTestsCount">0</div><div class="stat-label">Testes aplicados</div></div>
+                        </div>
+                        <div id="dashUnregisteredList"></div>
+                    </div>
+                    <div class="card">
                         <label>Resultados de Sondagem no Período</label>
                         <div id="dashProbeChart" style="margin-top:15px;"></div>
                     </div>
@@ -280,16 +296,21 @@
             <h1>Prontuário Clínico</h1>
             <div class="card no-print"><label>Paciente</label><select id="prontPatientSelect" onchange="loadProntuario()"><option value="">-- Escolha --</option></select></div>
             <div id="prontContent" style="display:none;">
+                <div id="printClinicHeader" class="print-only"></div>
                 <p id="printDate" class="print-only" style="color:#64748b;font-size:0.85rem;margin-bottom:15px;"></p>
                 <div class="result-panel">
                     <div style="font-size:2rem;">👤</div>
                     <div style="flex:1;"><h2 id="prontName" style="margin:0;border:none;padding:0;font-size:1.4rem;"></h2><p id="prontMeta" style="color:#64748b;margin-top:5px;"></p></div>
-                    <button class="btn-primary no-print" onclick="preparePrint()">🖨️ Imprimir / Salvar PDF</button>
+                    <div class="no-print" style="display:flex;flex-direction:column;gap:8px;">
+                        <button class="btn-primary" onclick="preparePrint()">🖨️ Imprimir / Salvar PDF</button>
+                        <button class="btn-primary" style="background:#475569;" onclick="openAtendimentoClinico()">🧠 Atendimento Clínico</button>
+                    </div>
                 </div>
                 <div class="card"><label>Histórico de Avaliações</label><table><thead><tr><th>Data</th><th>Protocolo</th><th>Resultado</th><th>Interpretação</th></tr></thead><tbody id="testHistoryTable"></tbody></table></div>
 
                 <div class="card no-print">
                     <label>Novo Atendimento</label>
+                    <div id="noteAppointmentLink" style="display:none;margin:10px 0 15px;padding:12px 15px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:0.85rem;color:#1e3a8a;"></div>
                     <div class="form-grid">
                         <div><label>Profissional Responsável *</label><select id="noteProfessionalSelect"><option value="">Selecione...</option></select></div>
                         <div><label>Data e Hora do Atendimento</label><input type="datetime-local" id="appointmentDateTime"></div>
@@ -393,7 +414,7 @@
                 </div>
                 <div id="financeiroSummary" style="display:flex;gap:30px;flex-wrap:wrap;margin-bottom:20px;padding:15px;background:#f8fafc;border-radius:8px;font-size:0.9rem;color:#334155;"></div>
                 <table>
-                    <thead><tr><th>Paciente</th><th>Profissional</th><th>Resp. Pagamento</th><th>Data</th><th>Horário</th><th>Valor</th><th>Status</th><th></th></tr></thead>
+                    <thead><tr><th>Paciente</th><th>Profissional</th><th>Resp. Pagamento</th><th>Data / Horário</th><th>Valor</th><th>Atendimento</th><th>Status</th><th></th></tr></thead>
                     <tbody id="financeiroTableBody"></tbody>
                 </table>
             </div>
@@ -650,6 +671,13 @@ let allProfessionals = [];
 let currentNotes = [];
 let currentAppointments = [];
 let cfgClinicLogoDataUrl = null;
+let clinicSettings = {};
+// Paciente em foco: mantido entre Testes, Prontuário e Atendimento Clínico
+let currentPatientId = '';
+
+function setCurrentPatient(id) {
+    currentPatientId = id ? String(id) : '';
+}
 
 function nowLocalDatetimeString() {
     const d = new Date();
@@ -670,6 +698,17 @@ function dateOffsetString(daysAgo) {
     return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 }
 
+function localDateString(d) {
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
+
+// Datas gravadas pelo SQLite (CURRENT_TIMESTAMP) estão em UTC, no formato "AAAA-MM-DD HH:MM:SS".
+function parseUtcTimestamp(ts) {
+    const d = new Date(String(ts).replace(' ', 'T') + 'Z');
+    return isNaN(d) ? new Date(ts) : d;
+}
+
 function timeToMinutes(t) {
     const [h, m] = t.split(':').map(Number);
     return h * 60 + m;
@@ -686,6 +725,27 @@ function professionalLabel(id) {
 
 function escapeHtml(str) {
     return String(str ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function clinicAddressLine(s) {
+    const streetPart = [s.clinic_street, s.clinic_number].filter(Boolean).join(', ');
+    return [streetPart, s.clinic_neighborhood, s.clinic_zip ? `CEP ${s.clinic_zip}` : ''].filter(Boolean).join(' — ');
+}
+
+// Cabeçalho com os dados da clínica (Configurações) usado em todos os documentos impressos.
+function clinicHeaderHtml() {
+    const s = clinicSettings || {};
+    const logo = typeof s.clinic_logo === 'string' && s.clinic_logo.startsWith('data:image/') ? s.clinic_logo : '';
+    const address = clinicAddressLine(s);
+    if (!s.clinic_name && !s.clinic_document && !logo && !address) return '';
+    return `<div style="display:flex;align-items:center;gap:16px;padding-bottom:12px;margin-bottom:18px;border-bottom:2px solid #e2e8f0;">
+        ${logo ? `<img src="${escapeHtml(logo)}" alt="" style="max-height:60px;max-width:140px;object-fit:contain;">` : ''}
+        <div>
+            ${s.clinic_name ? `<div style="font-size:1.1rem;font-weight:700;color:#1e293b;">${escapeHtml(s.clinic_name)}</div>` : ''}
+            ${s.clinic_document ? `<div style="font-size:0.8rem;color:#64748b;">CNPJ/CPF: ${escapeHtml(s.clinic_document)}</div>` : ''}
+            ${address ? `<div style="font-size:0.8rem;color:#64748b;">${escapeHtml(address)}</div>` : ''}
+        </div>
+    </div>`;
 }
 
 function showStatus(msg, isError=false) {
@@ -722,6 +782,13 @@ async function refreshLists() {
     document.getElementById('testPatientSelect').innerHTML = '<option value="">Selecione...</option>' + opts;
     document.getElementById('prontPatientSelect').innerHTML = '<option value="">-- Escolha --</option>' + opts;
     document.getElementById('clinicoPatientSelect').innerHTML = '<option value="">-- Escolha --</option>' + opts;
+    if (currentPatientId && patients.some(p => String(p.id) === currentPatientId)) {
+        ['testPatientSelect', 'prontPatientSelect', 'clinicoPatientSelect'].forEach(id => {
+            document.getElementById(id).value = currentPatientId;
+        });
+    } else {
+        currentPatientId = '';
+    }
 
     const finPatientSelect = document.getElementById('finPatientSelect');
     const prevFinPatient = finPatientSelect.value;
@@ -732,7 +799,10 @@ async function refreshLists() {
 
     allProfessionals = await api('/api/professionals');
     const profOpts = allProfessionals.map(p => `<option value="${p.id}">${escapeHtml(p.full_name)} (${escapeHtml(p.profession)})</option>`).join('');
-    document.getElementById('noteProfessionalSelect').innerHTML = '<option value="">Selecione...</option>' + profOpts;
+    const noteProfSelect = document.getElementById('noteProfessionalSelect');
+    const prevNoteProf = noteProfSelect.value;
+    noteProfSelect.innerHTML = '<option value="">Selecione...</option>' + profOpts;
+    if (prevNoteProf) noteProfSelect.value = prevNoteProf;
 
     const agendaSelect = document.getElementById('agendaProfessionalSelect');
     const prevAgendaProf = agendaSelect.value;
@@ -757,6 +827,7 @@ async function refreshLists() {
     renderProfessionalsTable();
 
     const settings = await api('/api/settings');
+    clinicSettings = settings;
     document.getElementById('cfgOpenTime').value = settings.clinic_open_time;
     document.getElementById('cfgCloseTime').value = settings.clinic_close_time;
     document.getElementById('cfgDuration').value = settings.session_duration_minutes;
@@ -857,6 +928,7 @@ async function saveSettings() {
         clinic_zip: document.getElementById('cfgZip').value.trim()
     });
     if(res.error) return showStatus('❌ ' + res.error, true);
+    clinicSettings = await api('/api/settings');
     showStatus('✅ Configurações salvas!');
 }
 
@@ -959,15 +1031,20 @@ async function loadAgenda() {
         return;
     }
     const patientOptions = '<option value="">Selecionar paciente...</option>' + allPatients.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
+    const isPastOrToday = date <= todayLocalDateString();
     container.innerHTML = slots.map(slot => {
         const startStr = minutesToTime(slot.start);
         const endStr = minutesToTime(slot.end);
         const appt = currentAppointments.find(a => a.start_time === startStr);
         if (appt) {
             const patient = allPatients.find(p => p.id === appt.patient_id);
-            return `<div style="display:flex;align-items:center;justify-content:space-between;padding:14px;border-bottom:1px solid #f1f5f9;background:#eff6ff;">
+            const actions = appt.note_id
+                ? '<span class="badge badge-low">✅ Atendimento registrado</span>'
+                : `${isPastOrToday ? `<button class="btn-primary" style="padding:6px 14px;font-size:0.8rem;" onclick="registerFromAppointment(${appt.id})">📝 Registrar atendimento</button>` : ''}
+                   <button class="btn-primary" style="background:#991b1b;padding:6px 14px;font-size:0.8rem;" onclick="cancelAppointment(${appt.id})">❌ Cancelar</button>`;
+            return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:14px;border-bottom:1px solid #f1f5f9;background:#eff6ff;">
                 <div><strong>${startStr} – ${endStr}</strong> &nbsp; 👤 ${escapeHtml(patient ? patient.name : ('Paciente #' + appt.patient_id))}</div>
-                <button class="btn-primary" style="background:#991b1b;padding:6px 14px;font-size:0.8rem;" onclick="cancelAppointment(${appt.id})">❌ Cancelar</button>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">${actions}</div>
             </div>`;
         }
         return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px;border-bottom:1px solid #f1f5f9;flex-wrap:wrap;">
@@ -994,9 +1071,47 @@ async function bookSlot(startMin, startTime) {
 
 async function cancelAppointment(id) {
     if (!confirm('Cancelar este agendamento?')) return;
-    await api(`/api/appointments/${id}`, 'DELETE');
+    const res = await api(`/api/appointments/${id}`, 'DELETE');
+    if (res.error) { showStatus('❌ ' + res.error, true); loadAgenda(); return; }
     showStatus('✅ Agendamento cancelado.');
     loadAgenda();
+}
+
+// Agendamento que está sendo documentado no prontuário (vindo da Agenda).
+let pendingAppointmentLink = null;
+
+async function registerFromAppointment(appointmentId) {
+    // Pode vir da Agenda ou da lista de pendências do Dashboard do Atendimento Clínico
+    const appt = currentAppointments.find(a => a.id === appointmentId)
+        || dashUnregisteredAppointments.find(a => a.id === appointmentId);
+    if (!appt) return;
+    pendingAppointmentLink = {
+        appointment_id: appt.id,
+        patient_id: appt.patient_id,
+        professional_id: appt.professional_id,
+        appointment_at: `${appt.date}T${appt.start_time}`
+    };
+    await openProntuario(appt.patient_id);
+}
+
+function applyAppointmentLink(pid) {
+    const banner = document.getElementById('noteAppointmentLink');
+    if (!pendingAppointmentLink || String(pendingAppointmentLink.patient_id) !== String(pid)) {
+        pendingAppointmentLink = null;
+        banner.style.display = 'none';
+        return;
+    }
+    const [d, t] = pendingAppointmentLink.appointment_at.split('T');
+    document.getElementById('noteProfessionalSelect').value = pendingAppointmentLink.professional_id;
+    document.getElementById('appointmentDateTime').value = pendingAppointmentLink.appointment_at;
+    banner.innerHTML = `🔗 Registrando o atendimento agendado em <strong>${new Date(d+'T00:00:00').toLocaleDateString('pt-BR')} às ${escapeHtml(t)}</strong> com ${escapeHtml(professionalLabel(pendingAppointmentLink.professional_id))}.
+        <button type="button" onclick="clearAppointmentLink()" style="margin-left:8px;background:none;border:none;color:#991b1b;cursor:pointer;font-weight:600;">Desvincular</button>`;
+    banner.style.display = 'block';
+}
+
+function clearAppointmentLink() {
+    pendingAppointmentLink = null;
+    document.getElementById('noteAppointmentLink').style.display = 'none';
 }
 
 let financeiroRaw = [];
@@ -1013,12 +1128,18 @@ function financeiroRowPrice(f) {
         : defaultSessionPrice;
 }
 
+let financeiroInitialized = false;
+
 async function openFinanceiro() {
     await switchTab('financeiro');
-    const monthSelect = document.getElementById('finMonth');
-    const yearInput = document.getElementById('finYear');
-    if (!monthSelect.value) monthSelect.value = String(new Date().getMonth() + 1);
-    if (!yearInput.value) yearInput.value = new Date().getFullYear();
+    // O select de mês nunca fica vazio (começa em Janeiro), então o mês atual
+    // é aplicado na primeira abertura; depois, mantém o período escolhido.
+    if (!financeiroInitialized) {
+        document.getElementById('finMonth').value = String(new Date().getMonth() + 1);
+        const yearInput = document.getElementById('finYear');
+        if (!yearInput.value) yearInput.value = new Date().getFullYear();
+        financeiroInitialized = true;
+    }
     loadFinanceiro();
 }
 
@@ -1033,6 +1154,7 @@ async function loadFinanceiro() {
 
     financeiroRaw = await api(`/api/financeiro?year=${year}&month=${month}`);
     const settings = await api('/api/settings');
+    clinicSettings = settings;
     defaultSessionPrice = Number(settings.session_price) || 0;
     applyFinanceiroPatientFilter();
 }
@@ -1041,6 +1163,12 @@ function applyFinanceiroPatientFilter() {
     const patientId = document.getElementById('finPatientSelect').value;
     currentFinanceiro = patientId ? financeiroRaw.filter(f => String(f.patient_id) === String(patientId)) : financeiroRaw;
     renderFinanceiroTable();
+}
+
+function payerLabel(f) {
+    if (f.payment_responsible === 'paciente') return 'Paciente';
+    if (f.payment_responsible === 'responsavel') return f.guardian_name ? `Responsável (${f.guardian_name})` : 'Responsável';
+    return '-';
 }
 
 function renderFinanceiroTable() {
@@ -1061,17 +1189,19 @@ function renderFinanceiroTable() {
 
     tbody.innerHTML = currentFinanceiro.map(f => {
         const isPaid = !!f.paid;
-        const payerLabel = f.payment_responsible === 'paciente' ? 'Paciente' : (f.payment_responsible === 'responsavel' ? 'Responsável' : '-');
         const paidDateHtml = isPaid && f.paid_date
             ? `<div style="font-size:0.75rem;color:#94a3b8;margin-top:4px;">em ${new Date(f.paid_date+'T00:00:00').toLocaleDateString('pt-BR')}</div>`
             : '';
+        const noteHtml = f.note_id
+            ? '<span class="badge badge-low">Registrado</span>'
+            : '<span class="badge" style="background:#f1f5f9;color:#64748b;">Sem registro</span>';
         return `<tr>
             <td><strong>${escapeHtml(f.patient_name)}</strong></td>
             <td>${escapeHtml(f.professional_name)}</td>
-            <td>${escapeHtml(payerLabel)}</td>
-            <td>${new Date(f.date+'T00:00:00').toLocaleDateString('pt-BR')}</td>
-            <td>${escapeHtml(f.start_time)}</td>
+            <td>${escapeHtml(payerLabel(f))}</td>
+            <td>${new Date(f.date+'T00:00:00').toLocaleDateString('pt-BR')}<div style="font-size:0.75rem;color:#94a3b8;margin-top:4px;">${escapeHtml(f.start_time)}</div></td>
             <td>${formatCurrency(financeiroRowPrice(f))}</td>
+            <td>${noteHtml}</td>
             <td><span class="badge ${isPaid ? 'badge-low' : 'badge-high'}">${isPaid ? 'Baixado' : 'Não baixado'}</span>${paidDateHtml}</td>
             <td>${isPaid ? '' : `<button class="btn-primary" style="padding:6px 14px;font-size:0.8rem;" onclick="markPaid(${f.id})">✅ Pago</button>`}</td>
         </tr>`;
@@ -1081,10 +1211,12 @@ function renderFinanceiroTable() {
     const paidTotal = currentFinanceiro.filter(f => f.paid).reduce((sum, f) => sum + financeiroRowPrice(f), 0);
     const paidCount = currentFinanceiro.filter(f => f.paid).length;
     const pendingTotal = total - paidTotal;
+    const unregisteredCount = currentFinanceiro.filter(f => !f.note_id).length;
     summary.innerHTML = `
         <div>${currentFinanceiro.length} atendimento(s) — Total: <strong>${formatCurrency(total)}</strong></div>
         <div style="color:#166534;">Baixado: <strong>${formatCurrency(paidTotal)}</strong> (${paidCount})</div>
         <div style="color:#991b1b;">Não baixado: <strong>${formatCurrency(pendingTotal)}</strong> (${currentFinanceiro.length - paidCount})</div>
+        <div style="color:#64748b;">Sem registro no prontuário: <strong>${unregisteredCount}</strong></div>
     `;
 }
 
@@ -1127,15 +1259,15 @@ function exportFinanceiroPdf() {
 
     const rowsHtml = currentFinanceiro.map(f => {
         const isPaid = !!f.paid;
-        const payerLabel = f.payment_responsible === 'paciente' ? 'Paciente' : (f.payment_responsible === 'responsavel' ? 'Responsável' : '-');
         const paidDate = isPaid && f.paid_date ? new Date(f.paid_date+'T00:00:00').toLocaleDateString('pt-BR') : '-';
         return `<tr>
             <td>${escapeHtml(f.patient_name)}</td>
             <td>${escapeHtml(f.professional_name)}</td>
-            <td>${escapeHtml(payerLabel)}</td>
+            <td>${escapeHtml(payerLabel(f))}</td>
             <td>${new Date(f.date+'T00:00:00').toLocaleDateString('pt-BR')}</td>
             <td>${escapeHtml(f.start_time)}</td>
             <td>${formatCurrency(financeiroRowPrice(f))}</td>
+            <td>${f.note_id ? 'Registrado' : 'Sem registro'}</td>
             <td>${isPaid ? 'Baixado' : 'Não baixado'}</td>
             <td>${paidDate}</td>
         </tr>`;
@@ -1145,6 +1277,7 @@ function exportFinanceiroPdf() {
     const paidTotal = currentFinanceiro.filter(f => f.paid).reduce((sum, f) => sum + financeiroRowPrice(f), 0);
     const paidCount = currentFinanceiro.filter(f => f.paid).length;
     const pendingTotal = total - paidTotal;
+    const unregisteredCount = currentFinanceiro.filter(f => !f.note_id).length;
 
     const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Financeiro - ${escapeHtml(monthLabel)}/${escapeHtml(year)}</title>
         <style>
@@ -1156,11 +1289,13 @@ function exportFinanceiroPdf() {
             .summary{color:#64748b;margin-bottom:5px;font-size:0.9rem;}
         </style></head>
         <body>
+            ${clinicHeaderHtml()}
             <h1>Financeiro — ${escapeHtml(monthLabel)}/${escapeHtml(year)}</h1>
             <p class="summary">Total do período: <strong>${formatCurrency(total)}</strong> — Baixado: ${formatCurrency(paidTotal)} (${paidCount}) — Não baixado: ${formatCurrency(pendingTotal)} (${currentFinanceiro.length - paidCount})</p>
+            <p class="summary">Sessões sem registro no prontuário: ${unregisteredCount}</p>
             <p class="summary">Emitido em ${new Date().toLocaleString('pt-BR')}</p>
             <table>
-                <thead><tr><th>Paciente</th><th>Profissional</th><th>Resp. Pagamento</th><th>Data</th><th>Horário</th><th>Valor</th><th>Status</th><th>Data Pagamento</th></tr></thead>
+                <thead><tr><th>Paciente</th><th>Profissional</th><th>Resp. Pagamento</th><th>Data</th><th>Horário</th><th>Valor</th><th>Atendimento</th><th>Status</th><th>Data Pagamento</th></tr></thead>
                 <tbody>${rowsHtml}</tbody>
             </table>
         </body></html>`;
@@ -1202,7 +1337,7 @@ async function savePatient() {
     if(!name) return alert('Nome obrigatório');
     if(!patientSince) return alert('Informe a data "Paciente Desde".');
     const paymentResponsible = document.querySelector('input[name=pPaymentResponsible]:checked')?.value || '';
-    await api('/api/patients', 'POST', {
+    const res = await api('/api/patients', 'POST', {
         name,
         dob: document.getElementById('pDob').value,
         contact: document.getElementById('pContact').value,
@@ -1214,6 +1349,9 @@ async function savePatient() {
         guardian_relationship: document.getElementById('pGuardianRelationship').value,
         payment_responsible: paymentResponsible
     });
+    if (res.error) return showStatus('❌ ' + res.error, true);
+    // O paciente recém-cadastrado já fica em foco para Testes, Prontuário e Atendimento Clínico
+    setCurrentPatient(res.id);
     showStatus('✅ Paciente salvo no banco de dados!');
     document.getElementById('pName').value = '';
     document.getElementById('pDob').value = '';
@@ -1260,10 +1398,18 @@ async function calculateResult(type) {
     document.getElementById('dynamicTestForm').innerHTML = `<div class="result-panel"><div class="score-big">${result.score}/${result.max}</div><div><h3 style="margin-bottom:8px;color:${isHigh?'#991b1b':'#166534'}">${isHigh?'⚠️ Elevado':'✅ Normal'}</h3><p>${escapeHtml(result.interpretation)}</p><button type="button" class="btn-primary" style="margin-top:15px;padding:8px 16px;font-size:0.85rem;" onclick="openProntuario(${Number(pid)})">Ver Prontuário →</button></div></div>`;
 }
 
+let prontuarioLoadedPid = '';
+
+async function openProntuarioTab() {
+    await switchTab('prontuario');
+    loadProntuario();
+}
+
 async function loadProntuario() {
     const pid = document.getElementById('prontPatientSelect').value;
+    setCurrentPatient(pid);
     const content = document.getElementById('prontContent');
-    if(!pid) { content.style.display='none'; return; }
+    if(!pid) { content.style.display='none'; clearAppointmentLink(); return; }
     const patients = await api('/api/patients');
     const p = patients.find(x => x.id == pid);
     document.getElementById('prontName').textContent = p.name;
@@ -1274,14 +1420,19 @@ async function loadProntuario() {
     tbody.innerHTML = tests.length ? '' : '<tr><td colspan="4" style="text-align:center;color:#94a3b8;padding:20px;">Sem avaliações.</td></tr>';
     tests.forEach(t => {
         const isHigh = TESTS_CONFIG[t.type]?.isHighScore?.(t.score) ?? false;
-        tbody.innerHTML += `<tr><td>${new Date(t.date).toLocaleDateString('pt-BR')}</td><td><strong>${escapeHtml(TESTS_CONFIG[t.type]?.name||t.type)}</strong></td><td><span class="badge ${isHigh?'badge-high':'badge-low'}">${t.score}/${t.max_score}</span></td><td style="font-size:0.85rem;color:#64748b;">${escapeHtml(t.interpretation)}</td></tr>`;
+        tbody.innerHTML += `<tr><td>${parseUtcTimestamp(t.date).toLocaleDateString('pt-BR')}</td><td><strong>${escapeHtml(TESTS_CONFIG[t.type]?.name||t.type)}</strong></td><td><span class="badge ${isHigh?'badge-high':'badge-low'}">${t.score}/${t.max_score}</span></td><td style="font-size:0.85rem;color:#64748b;">${escapeHtml(t.interpretation)}</td></tr>`;
     });
 
     currentNotes = await api(`/api/notes/${pid}`);
     renderNotesHistory();
-    document.getElementById('noteProfessionalSelect').value = '';
-    document.getElementById('appointmentDateTime').value = nowLocalDatetimeString();
-    document.getElementById('newNoteContent').value = '';
+    // Voltando ao mesmo paciente, o rascunho do novo atendimento é mantido.
+    if (prontuarioLoadedPid !== String(pid)) {
+        document.getElementById('noteProfessionalSelect').value = '';
+        document.getElementById('appointmentDateTime').value = nowLocalDatetimeString();
+        document.getElementById('newNoteContent').value = '';
+    }
+    prontuarioLoadedPid = String(pid);
+    applyAppointmentLink(pid);
     content.style.display = 'block';
 }
 
@@ -1294,7 +1445,7 @@ function renderNotesHistory() {
     container.innerHTML = currentNotes.map(n => `
         <div style="padding:16px 0;border-bottom:1px solid #f1f5f9;">
             <div style="font-weight:700;color:var(--primary);font-size:0.9rem;margin-bottom:2px;">${new Date(n.appointment_at).toLocaleString('pt-BR')}</div>
-            <div style="font-size:0.8rem;color:#64748b;margin-bottom:8px;">👨‍⚕️ ${escapeHtml(professionalLabel(n.professional_id))}</div>
+            <div style="font-size:0.8rem;color:#64748b;margin-bottom:8px;">👨‍⚕️ ${escapeHtml(professionalLabel(n.professional_id))}${n.appointment_id ? ' · 🗓️ sessão da Agenda' : ''}</div>
             <div style="white-space:pre-wrap;font-size:0.9rem;color:#334155;">${escapeHtml(n.content)}</div>
         </div>
     `).join('');
@@ -1309,8 +1460,14 @@ async function saveNote() {
     if(!professionalId) return alert('Selecione o profissional responsável pelo atendimento.');
     if(!appointmentAt) return alert('Informe a data e hora do atendimento.');
     if(!content) return alert('Escreva o conteúdo do atendimento.');
-    await api(`/api/notes/${pid}`, 'POST', { appointment_at: appointmentAt, content, professional_id: Number(professionalId) });
+    const payload = { appointment_at: appointmentAt, content, professional_id: Number(professionalId) };
+    if (pendingAppointmentLink && String(pendingAppointmentLink.patient_id) === String(pid)) {
+        payload.appointment_id = pendingAppointmentLink.appointment_id;
+    }
+    const res = await api(`/api/notes/${pid}`, 'POST', payload);
+    if (res.error) return showStatus('❌ ' + res.error, true);
     showStatus('✅ Atendimento salvo no banco de dados!');
+    clearAppointmentLink();
     document.getElementById('noteProfessionalSelect').value = '';
     document.getElementById('newNoteContent').value = '';
     document.getElementById('appointmentDateTime').value = nowLocalDatetimeString();
@@ -1319,6 +1476,7 @@ async function saveNote() {
 }
 
 function preparePrint() {
+    document.getElementById('printClinicHeader').innerHTML = clinicHeaderHtml();
     document.getElementById('printDate').textContent = `Emitido em: ${new Date().toLocaleString('pt-BR')}`;
     window.print();
 }
@@ -1354,6 +1512,7 @@ function generatePeriodPdf() {
             .count{color:#64748b;margin-bottom:25px;font-size:0.9rem;font-weight:700;}
         </style></head>
         <body>
+            ${clinicHeaderHtml()}
             <h1>${escapeHtml(patientName)}</h1>
             <p class="meta">${escapeHtml(patientMeta)}</p>
             <p class="period">Atendimentos de ${fromDate.toLocaleDateString('pt-BR')} a ${new Date(to+'T00:00:00').toLocaleDateString('pt-BR')} — emitido em ${new Date().toLocaleString('pt-BR')}</p>
@@ -1373,7 +1532,13 @@ let dataSheetComponents = [];
 
 async function openAtendimentoClinico() {
     await switchTab('atendimento');
-    if (document.getElementById('clinicoPatientSelect').value) loadAtendimentoClinico();
+    loadAtendimentoClinico();
+}
+
+function openProntuarioFromClinico() {
+    const pid = document.getElementById('clinicoPatientSelect').value;
+    if (!pid) return alert('Selecione um paciente.');
+    openProntuario(pid);
 }
 
 function switchClinicoSubTab(sub) {
@@ -1385,6 +1550,7 @@ function switchClinicoSubTab(sub) {
 
 async function loadAtendimentoClinico() {
     const pid = document.getElementById('clinicoPatientSelect').value;
+    setCurrentPatient(pid);
     const content = document.getElementById('clinicoContent');
     if (!pid) { content.style.display = 'none'; return; }
     content.style.display = 'block';
@@ -1687,6 +1853,23 @@ function renderClinicoBarChart(containerId, data) {
     }).join('');
 }
 
+let dashUnregisteredAppointments = [];
+
+function renderDashUnregisteredList() {
+    const container = document.getElementById('dashUnregisteredList');
+    if (!dashUnregisteredAppointments.length) {
+        container.innerHTML = '';
+        return;
+    }
+    container.innerHTML = `<label>Sessões sem registro no prontuário</label>` + dashUnregisteredAppointments.map(a => `
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #f1f5f9;font-size:0.9rem;">
+            <div><strong>${new Date(a.date+'T00:00:00').toLocaleDateString('pt-BR')} às ${escapeHtml(a.start_time)}</strong>
+                <span style="color:#64748b;"> · ${escapeHtml(professionalLabel(a.professional_id))}</span></div>
+            <button class="btn-primary" style="padding:6px 14px;font-size:0.8rem;white-space:nowrap;" onclick="registerFromAppointment(${a.id})">📝 Registrar atendimento</button>
+        </div>
+    `).join('');
+}
+
 async function loadClinicoDashboard() {
     const pid = document.getElementById('clinicoPatientSelect').value;
     if (!pid) return;
@@ -1694,11 +1877,14 @@ async function loadClinicoDashboard() {
     const to = document.getElementById('dashTo').value;
     if (!from || !to) return;
 
-    const [sheets, probes, scatter, links] = await Promise.all([
+    const [sheets, probes, scatter, links, appointments, notes, tests] = await Promise.all([
         api(`/api/data-sheets/${pid}`),
         api(`/api/probe-tracking/${pid}`),
         api(`/api/scatterplot/${pid}`),
-        api(`/api/behavior-links/${pid}`)
+        api(`/api/behavior-links/${pid}`),
+        api(`/api/appointments?patient_id=${pid}`),
+        api(`/api/notes/${pid}`),
+        api(`/api/tests/${pid}`)
     ]);
 
     const inRange = dateStr => dateStr >= from && dateStr <= to;
@@ -1712,6 +1898,15 @@ async function loadClinicoDashboard() {
     // Vínculos de comportamento são planos em vigor, não eventos datados:
     // mostra o total ativo, independente do período selecionado.
     document.getElementById('dashLinksCount').textContent = links.length;
+
+    const today = todayLocalDateString();
+    const apptsInRange = appointments.filter(a => inRange(a.date));
+    dashUnregisteredAppointments = apptsInRange.filter(a => a.date <= today && !a.note_id);
+    document.getElementById('dashApptCount').textContent = apptsInRange.length;
+    document.getElementById('dashUnregisteredCount').textContent = dashUnregisteredAppointments.length;
+    document.getElementById('dashNotesCount').textContent = notes.filter(n => inRange(n.appointment_at.slice(0, 10))).length;
+    document.getElementById('dashTestsCount').textContent = tests.filter(t => inRange(localDateString(parseUtcTimestamp(t.date)))).length;
+    renderDashUnregisteredList();
 
     const shiftCounts = { manha: 0, tarde: 0, noite: 0 };
     scatterInRange.forEach(s => { if (shiftCounts[s.shift] !== undefined) shiftCounts[s.shift]++; });
